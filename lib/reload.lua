@@ -4,7 +4,14 @@ function M.start()
   local function reloadConfig(files)
     for _, file in ipairs(files) do
       if file:sub(-4) == ".lua" then
-        hs.reload()
+        -- Add a small delay to prevent rapid reloads if multiple files are saved quickly
+        hs.timer.doAfter(0.1, function()
+          hs.reload()
+          hs.notify.new({
+            title = "Hammerspoon",
+            informativeText = "Hammerspoon Config Reloaded 🚀"
+          }):send()
+        end)
         return
       end
     end
@@ -12,11 +19,6 @@ function M.start()
 
   local watcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.hammerspoon/", reloadConfig)
   watcher:start()
-
-  hs.notify.new({
-    title = "Hammerspoon",
-    informativeText = "Hammerspoon Setting Reloaded 🚀"
-  }):send()
 end
 
 return M
