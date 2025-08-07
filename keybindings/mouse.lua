@@ -15,7 +15,7 @@ local movingTimers = {}
 local function startMouseMove(key, dx, dy)
   if movingTimers[key] then return end
   movingTimers[key] = hs.timer.doEvery(moveInterval, function()
-    local pt = hs.mouse.getAbsolutePosition()
+    local pt = hs.mouse.absolutePosition()
     hs.mouse.setAbsolutePosition({x = pt.x + dx, y = pt.y + dy})
   end)
 end
