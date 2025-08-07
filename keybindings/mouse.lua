@@ -1,4 +1,4 @@
-local utils = require("lib.utils")
+local utils = require("lib.mouse_utils")
 
 hs.hotkey.bind({"option"}, "F", function()
   utils.mouseClick("left")

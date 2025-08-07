@@ -1,4 +1,4 @@
-local utils = require("lib.utils")
+local utils = require("lib.mouse_utils")
 
 local firstKey = nil
 local keyTimer = nil
