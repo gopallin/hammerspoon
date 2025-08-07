@@ -8,7 +8,7 @@ hs.hotkey.bind({"option"}, "V", function()
   utils.mouseClick("right")
 end)
 
-local moveSpeed = 3
+local moveSpeed = 5
 local moveInterval = 0.01
 local movingTimers = {}
 
