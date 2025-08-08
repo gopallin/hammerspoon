@@ -9,6 +9,7 @@ local vim = {}
 
 -- Load core Vim logic and state management
 local vim_core = require("lib.vim_core")
+local app_exclusions = require("lib.app_exclusions")
 
 -- Binds the Escape key to return to Normal mode.
 -- This is a common action for both Insert and Visual modes.
@@ -75,6 +76,9 @@ end
 
 -- Initialize the master hotkey for the Vim system
 vim_core.init_master_hotkey()
+
+-- Initialize the application exclusion watcher
+app_exclusions.init()
 
 -- Set the mode change callback for vim_core
 vim_core.set_mode_change_callback(vim.change_mode)
