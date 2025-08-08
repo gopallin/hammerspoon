@@ -25,6 +25,9 @@ vim_core.state = {
     active_hotkeys = {}      -- A table to hold currently active mode-specific hotkeys
 }
 
+-- Callback function to be set by the keybindings module
+local mode_change_callback = nil
+
 -- Shows, hides, or updates the on-screen mode indicator
 function vim_core.update_visual_indicator()
     if vim_core.state.mode == vim_core.MODES.DISABLED then
@@ -45,20 +48,24 @@ end
 -- Function to change the current mode of the Vim system
 -- @param new_mode string The mode to transition to (e.g., vim_core.MODES.NORMAL, vim_core.MODES.INSERT)
 function vim_core.change_mode(new_mode)
+    hs.alert.show("vim_core.change_mode called: " .. new_mode) -- Debugging alert
     -- Do nothing if trying to change to the current mode
     if vim_core.state.mode == new_mode then return end
 
     vim_core.state.mode = new_mode -- Update the current mode
     vim_core.clear_active_hotkeys() -- Deactivate hotkeys from the previous mode
 
-    -- The actual keybinding logic will be handled by the keybindings/vim.lua module
-    -- This function only manages the state and visual indicator.
+    -- Call the callback function provided by the keybindings module to bind hotkeys
+    if mode_change_callback then
+        mode_change_callback(new_mode)
+    end
 
     vim_core.update_visual_indicator() -- Update the on-screen mode indicator
 end
 
 -- Toggles the entire Vim system on or off
 function vim_core.toggle_system()
+    hs.alert.show("vim_core.toggle_system called") -- Debugging alert
     if vim_core.state.mode == vim_core.MODES.DISABLED then
         vim_core.change_mode(vim_core.MODES.NORMAL) -- If disabled, enable and enter NORMAL mode
     else
@@ -71,6 +78,11 @@ function vim_core.init_master_hotkey()
     -- Bind the master hotkey (Cmd+Alt+Ctrl+V) to toggle the system.
     -- This uses a complex modifier to minimize conflicts with other applications.
     vim_core.state.master_hotkey = hs.hotkey.bind({"cmd", "alt", "ctrl"}, "v", vim_core.toggle_system)
+end
+
+-- Function to set the mode change callback
+function vim_core.set_mode_change_callback(callback)
+    mode_change_callback = callback
 end
 
 return vim_core

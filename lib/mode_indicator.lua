@@ -9,6 +9,7 @@ local indicator = {}
 -- Load required Hammerspoon modules
 local hs_canvas_module = require("hs.canvas")
 local hs_styledtext_module = require("hs.styledtext")
+local hs_timer_module = require("hs.timer") -- Added for flashing
 
 -- -------------------------------------------------------------------
 -- Configuration
@@ -28,6 +29,7 @@ local UI_CONFIG = {
 -- -------------------------------------------------------------------
 
 local drawing = nil -- This will hold our hs.canvas object for the indicator
+local flash_timer = nil -- Timer for the flashing effect
 
 -- -------------------------------------------------------------------
 -- Core Functions
@@ -35,6 +37,10 @@ local drawing = nil -- This will hold our hs.canvas object for the indicator
 
 -- Hides and destroys the mode indicator
 function indicator.hide()
+    if flash_timer then
+        flash_timer:stop()
+        flash_timer = nil
+    end
     if drawing then
         drawing:delete() -- Delete the canvas object
         drawing = nil    -- Clear the reference
@@ -68,22 +74,36 @@ function indicator.update(mode_text)
         type = "rectangle",
         fillColor = UI_CONFIG.BG_COLOR,
         frame = {x=0, y=0, w=UI_CONFIG.WIDTH, h=UI_CONFIG.HEIGHT},
-        roundedRect = UI_CONFIG.HEIGHT / 4 -- Apply rounded corners
+        roundedRectRadii = {xRadius = UI_CONFIG.HEIGHT / 4, yRadius = UI_CONFIG.HEIGHT / 4} -- Apply rounded corners
     }
 
     -- Element 2: Mode text
+    local styled_text = hs_styledtext_module.new(mode_text, {
+        font = {size = UI_CONFIG.FONT_SIZE},
+        color = UI_CONFIG.TEXT_COLOR,
+        paragraphStyle = {alignment = "center"}
+    })
+
     drawing[2] = {
         type = "text",
-        text = mode_text,
-        frame = {x=0, y=0, w=UI_CONFIG.WIDTH, h=UI_CONFIG.HEIGHT},
-        font = { size = UI_CONFIG.FONT_SIZE },
-        textColor = UI_CONFIG.TEXT_COLOR,
-        horizontalAlignment = "center",
-        verticalAlignment = "center"
+        text = styled_text,
+        frame = {x=0, y=0, w=UI_CONFIG.WIDTH, h=UI_CONFIG.HEIGHT}
     }
 
     -- Show the indicator on screen
     drawing:show()
+
+    -- Create and start a timer to make the indicator flash
+    flash_timer = hs_timer_module.new(1, function()
+        if drawing then
+            if drawing:isVisible() then
+                drawing:hide()
+            else
+                drawing:show()
+            end
+        end
+    end)
+    flash_timer:start()
 end
 
 return indicator
