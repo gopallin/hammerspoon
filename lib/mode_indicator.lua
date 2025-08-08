@@ -9,7 +9,6 @@ local indicator = {}
 -- Load required Hammerspoon modules
 local hs_canvas_module = require("hs.canvas")
 local hs_styledtext_module = require("hs.styledtext")
-local hs_timer_module = require("hs.timer") -- Added for flashing
 
 -- -------------------------------------------------------------------
 -- Configuration
@@ -17,11 +16,13 @@ local hs_timer_module = require("hs.timer") -- Added for flashing
 
 local UI_CONFIG = {
     WIDTH = 120,
-    HEIGHT = 40,
+    HEIGHT = 60, -- Increased height to accommodate key history
     PADDING = 15,
     FONT_SIZE = 18,
+    KEY_HISTORY_FONT_SIZE = 14,
     BG_COLOR = { hex = "#2c3e50" }, -- Dark Slate Blue
-    TEXT_COLOR = { hex = "#ecf0f1" }  -- Light Gray
+    TEXT_COLOR = { hex = "#ecf0f1" },  -- Light Gray
+    KEY_HISTORY_COLOR = { hex = "#bdc3c7" } -- Silver
 }
 
 -- -------------------------------------------------------------------
@@ -29,7 +30,6 @@ local UI_CONFIG = {
 -- -------------------------------------------------------------------
 
 local drawing = nil -- This will hold our hs.canvas object for the indicator
-local flash_timer = nil -- Timer for the flashing effect
 
 -- -------------------------------------------------------------------
 -- Core Functions
@@ -37,19 +37,16 @@ local flash_timer = nil -- Timer for the flashing effect
 
 -- Hides and destroys the mode indicator
 function indicator.hide()
-    if flash_timer then
-        flash_timer:stop()
-        flash_timer = nil
-    end
     if drawing then
         drawing:delete() -- Delete the canvas object
         drawing = nil    -- Clear the reference
     end
 end
 
--- Shows and updates the indicator with the specified mode text
+-- Shows and updates the indicator with the specified mode and key history
 -- @param mode_text string The text to display (e.g., "NORMAL", "INSERT")
-function indicator.update(mode_text)
+-- @param key_history_text string The key history to display
+function indicator.update(mode_text, key_history_text)
     -- Ensure any previous drawing is cleared before creating a new one
     indicator.hide()
 
@@ -77,33 +74,34 @@ function indicator.update(mode_text)
         roundedRectRadii = {xRadius = UI_CONFIG.HEIGHT / 4, yRadius = UI_CONFIG.HEIGHT / 4} -- Apply rounded corners
     }
 
-    -- Element 2: Mode text
+    -- Element 2: Key history text
+    local key_history_styled_text = hs_styledtext_module.new(key_history_text or "", {
+        font = {size = UI_CONFIG.KEY_HISTORY_FONT_SIZE},
+        color = UI_CONFIG.KEY_HISTORY_COLOR,
+        paragraphStyle = {alignment = "center"}
+    })
+
+    drawing[2] = {
+        type = "text",
+        text = key_history_styled_text,
+        frame = {x=0, y=0, w=UI_CONFIG.WIDTH, h=UI_CONFIG.HEIGHT / 2}
+    }
+
+    -- Element 3: Mode text
     local styled_text = hs_styledtext_module.new(mode_text, {
         font = {size = UI_CONFIG.FONT_SIZE},
         color = UI_CONFIG.TEXT_COLOR,
         paragraphStyle = {alignment = "center"}
     })
 
-    drawing[2] = {
+    drawing[3] = {
         type = "text",
         text = styled_text,
-        frame = {x=0, y=0, w=UI_CONFIG.WIDTH, h=UI_CONFIG.HEIGHT}
+        frame = {x=0, y=UI_CONFIG.HEIGHT / 2, w=UI_CONFIG.WIDTH, h=UI_CONFIG.HEIGHT / 2}
     }
 
     -- Show the indicator on screen
     drawing:show()
-
-    -- Create and start a timer to make the indicator flash
-    flash_timer = hs_timer_module.new(1, function()
-        if drawing then
-            if drawing:isVisible() then
-                drawing:hide()
-            else
-                drawing:show()
-            end
-        end
-    end)
-    flash_timer:start()
 end
 
 return indicator

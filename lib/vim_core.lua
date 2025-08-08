@@ -17,13 +17,16 @@ vim_core.MODES = {
 
 -- Load our custom UI module for visual feedback
 local mode_indicator = require("lib.mode_indicator")
+local hs_timer_module = require("hs.timer")
 
 -- Track the current state of the Vim module
 vim_core.state = {
     mode = vim_core.MODES.DISABLED, -- Start in DISABLED mode by default
     master_hotkey = nil,     -- The hotkey to toggle the entire system on/off
     active_hotkeys = {},      -- A table to hold currently active mode-specific hotkeys
-    user_disabled = true -- Flag to track if the user has manually disabled the system
+    user_disabled = true, -- Flag to track if the user has manually disabled the system
+    key_history = "", -- Stores the history of typed keys
+    key_clear_timer = nil -- Timer to clear the key history
 }
 
 -- Callback function to be set by the keybindings module
@@ -34,8 +37,29 @@ function vim_core.update_visual_indicator()
     if vim_core.state.mode == vim_core.MODES.DISABLED then
         mode_indicator.hide() -- Hide the indicator when the system is disabled
     else
-        mode_indicator.update(vim_core.state.mode) -- Show or update the indicator with the current mode
+        mode_indicator.update(vim_core.state.mode, vim_core.state.key_history) -- Show or update the indicator with the current mode and key history
     end
+end
+
+-- Adds a key to the key history and updates the display
+-- @param key string The key to add to the history
+function vim_core.add_key_to_history(key)
+    vim_core.state.key_history = vim_core.state.key_history .. key
+    if #vim_core.state.key_history > 10 then -- Limit history length
+        vim_core.state.key_history = string.sub(vim_core.state.key_history, -10)
+    end
+
+    -- Update the visual indicator
+    vim_core.update_visual_indicator()
+
+    -- Restart the timer to clear the history
+    if vim_core.state.key_clear_timer then
+        vim_core.state.key_clear_timer:stop()
+    end
+    vim_core.state.key_clear_timer = hs_timer_module.doAfter(2, function()
+        vim_core.state.key_history = ""
+        vim_core.update_visual_indicator() -- Redraw without history
+    end)
 end
 
 -- Function to clear all currently active, mode-specific hotkeys

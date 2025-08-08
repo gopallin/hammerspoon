@@ -42,6 +42,12 @@ The system shall operate on a modal basis, primarily using three modes:
 
 ### 2.4. Visual Feedback
 - A subtle, non-intrusive on-screen indicator shall be displayed to clearly show the current active mode (e.g., `NORMAL`, `INSERT`, `VISUAL`).
+- The indicator shall also display a history of recently typed keys, primarily for command sequences in Normal and Visual modes.
+
+### 2.5. Application Exclusions
+- The system shall allow for a configurable list of applications where the Vim mode is automatically disabled.
+- When a user switches to an excluded application, the Vim mode will be disabled.
+- When the user switches back to a non-excluded application, the Vim mode will be restored to its previous state.
 
 ## 3. Scope and Limitations
 

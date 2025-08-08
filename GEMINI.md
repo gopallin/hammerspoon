@@ -18,13 +18,16 @@ The user wants to create a system-wide Vim-like modal input system for macOS usi
     *   `NORMAL`: The default mode for navigation commands.
     *   `INSERT`: For passing keystrokes through to the OS for normal typing.
     *   `VISUAL`: For selecting text.
+4.  **Application Exclusions:** The `lib/app_exclusions.lua` module automatically disables Vim mode in specified applications.
+5.  **Visual Feedback:** The `lib/mode_indicator.lua` module displays the current mode and typed keystrokes.
 
 ## Key Implementation Details
 
 *   **Modal Logic:** The system is built around a `mode` variable (`vim.mode`) that tracks the current state. Keybindings are enabled or disabled based on the value of this variable.
 *   **Event Tapping:** Hammerspoon's `hs.hotkey.bind` and `hs.eventtap` are the core APIs used to intercept and remap keys.
 *   **Master Toggle:** A global hotkey (`Cmd+Alt+Ctrl+V`) is used to activate or deactivate the entire system. When inactive, all custom keybindings are disabled.
-*   **Visual Feedback:** An `hs.alert` or a custom `hs.drawing` object is used to display the current mode on-screen.
+*   **Visual Feedback:** A custom `hs.drawing` object is used to display the current mode and a history of typed keys on-screen.
+*   **Application Exclusions:** An `hs.application.watcher` automatically disables and re-enables Vim mode when switching to and from excluded applications.
 *   **No Dependencies:** This project intentionally avoids external tools like Karabiner-Elements.
 
 ## Development Workflow
