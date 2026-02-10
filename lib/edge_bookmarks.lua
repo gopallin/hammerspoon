@@ -2,6 +2,7 @@ local json = require("hs.json")
 local screen = require("hs.screen")
 local webview = require("hs.webview")
 local urlevent = require("hs.urlevent")
+local application = require("hs.application")
 
 local M = {}
 
@@ -20,8 +21,11 @@ local function expand_tilde(path)
 end
 
 local function edge_bookmarks_path()
-  -- Default profile for the current user
   return expand_tilde("~/Library/Application Support/Microsoft Edge/Default/Bookmarks")
+end
+
+local function ghostty_commands_path()
+  return expand_tilde("~/.hammerspoon/data/ghostty_commands.json")
 end
 
 local function extract_host(url)
@@ -81,6 +85,29 @@ local function load_edge_bookmarks()
   return items
 end
 
+local function load_ghostty_commands()
+  local path = ghostty_commands_path()
+  local content = read_file(path)
+  if not content then
+    return {}, ("Ghostty commands not found at: " .. path)
+  end
+  local data = json.decode(content)
+  if type(data) ~= "table" then
+    return {}, "Ghostty commands JSON is invalid."
+  end
+  local items = {}
+  for _, entry in ipairs(data) do
+    if entry.name and entry.command then
+      table.insert(items, {
+        text = entry.name,
+        subText = entry.subText or entry.command,
+        command = entry.command,
+      })
+    end
+  end
+  return items
+end
+
 local webview_instance = nil
 local esc_hotkey = nil
 local focus_timer = nil
@@ -111,6 +138,28 @@ hs.urlevent.bind("edge-bookmarks-close", function()
   close_webview()
 end)
 
+local function run_ghostty_command(cmd)
+  local app = application.get("Ghostty") or application.launchOrFocus("Ghostty")
+  if app then
+    app:activate(true)
+  end
+  -- Open a new tab, then type into Ghostty and press Enter.
+  hs.timer.doAfter(0.3, function()
+    hs.eventtap.keyStroke({ "cmd" }, "t")
+    hs.timer.doAfter(0.15, function()
+      hs.eventtap.keyStrokes(cmd)
+      hs.eventtap.keyStroke({}, "return")
+    end)
+  end)
+end
+
+hs.urlevent.bind("ghostty-run", function(_, params)
+  if params and params.cmd then
+    run_ghostty_command(params.cmd)
+  end
+  close_webview()
+end)
+
 local function spotlight_frame()
   local scr = screen.mainScreen()
   local frame = scr:frame()
@@ -121,15 +170,23 @@ local function spotlight_frame()
   return { x = x, y = y, w = width, h = height }
 end
 
-
-local function build_html(items)
-  local slim = {}
-  for _, item in ipairs(items) do
-    table.insert(slim, {
+local function build_html(edge_items, ghostty_items)
+  local slim_edge = {}
+  for _, item in ipairs(edge_items) do
+    table.insert(slim_edge, {
       text = item.text,
       subText = item.subText,
       iconUrl = item.iconUrl,
       url = item.url,
+    })
+  end
+
+  local slim_ghostty = {}
+  for _, item in ipairs(ghostty_items) do
+    table.insert(slim_ghostty, {
+      text = item.text,
+      subText = item.subText,
+      command = item.command,
     })
   end
 
@@ -138,22 +195,23 @@ local function build_html(items)
     return nil, "HTML template not found: ~/.hammerspoon/html/edge_bookmarks.html"
   end
 
-  local payload = json.encode(slim)
+  local payload = json.encode({ edge = slim_edge, ghostty = slim_ghostty })
   payload = payload:gsub("%%", "%%%%")
-  return html:gsub("__ITEMS__", payload, 1)
+  return html:gsub("__DATA__", payload, 1)
 end
 
 function M.show()
-  local items, err = load_edge_bookmarks()
-  if not items then
-    hs.alert.show(err, 2)
+  local edge_items, edge_err = load_edge_bookmarks()
+  if not edge_items then
+    hs.alert.show(edge_err, 2)
     return
   end
 
+  local ghostty_items = load_ghostty_commands()
+
   close_webview()
 
-
-  local html, html_err = build_html(items)
+  local html, html_err = build_html(edge_items, ghostty_items)
   if not html then
     hs.alert.show(html_err, 2)
     return

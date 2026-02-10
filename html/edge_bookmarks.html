@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <style>
     :root {
-      --bg: rgba(255, 255, 255, 0.9);
+      --bg: rgba(255, 255, 255, 0.8);
       --border: rgba(0, 0, 0, 0.08);
       --text: #1c1c1e;
       --subtext: #6e6e73;
       --highlight: rgba(0, 122, 255, 0.18);
       --highlight-strong: #0a84ff;
+      --pill: rgba(0, 0, 0, 0.06);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -26,11 +27,16 @@
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 14px;
-      padding: 14px 14px 10px 14px;
+      padding: 12px 12px 10px 12px;
       display: flex;
       flex-direction: column;
       gap: 10px;
       backdrop-filter: blur(18px) saturate(140%);
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
     .search {
       width: 100%;
@@ -39,7 +45,29 @@
       background: transparent;
       font-size: 18px;
       line-height: 24px;
-      padding: 6px 8px;
+      padding: 6px 6px;
+      flex: 1;
+    }
+    .modes {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px;
+      border-radius: 10px;
+      background: var(--pill);
+      font-size: 12px;
+      line-height: 16px;
+    }
+    .mode {
+      padding: 4px 8px;
+      border-radius: 8px;
+      color: var(--subtext);
+      user-select: none;
+    }
+    .mode.active {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
     }
     .list {
       display: flex;
@@ -101,16 +129,34 @@
 </head>
 <body>
   <div class="panel">
-    <input id="search" class="search" type="text" placeholder="Search Edge Favorites" autofocus autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" />
+    <div class="topbar">
+      <input id="search" class="search" type="text" placeholder="Search" autofocus autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" />
+      <div class="modes">
+        <div class="mode active" data-mode="edge">Edge</div>
+        <div class="mode" data-mode="ghostty">Ghostty</div>
+      </div>
+    </div>
     <div id="list" class="list"></div>
   </div>
 
   <script>
-    const items = __ITEMS__;
+    const data = __DATA__;
     const listEl = document.getElementById("list");
     const inputEl = document.getElementById("search");
+    const modeEls = Array.from(document.querySelectorAll(".mode"));
+    let mode = "edge";
+    let items = data.edge || [];
     let filtered = items;
     let active = 0;
+
+    function setMode(next) {
+      mode = next;
+      items = (mode === "ghostty") ? (data.ghostty || []) : (data.edge || []);
+      filtered = items;
+      active = 0;
+      modeEls.forEach(el => el.classList.toggle("active", el.dataset.mode === mode));
+      render();
+    }
 
     function render() {
       listEl.innerHTML = "";
@@ -121,9 +167,7 @@
         const icon = document.createElement("img");
         icon.className = "icon";
         icon.alt = "";
-        if (item.iconUrl) {
-          icon.src = item.iconUrl;
-        }
+        if (item.iconUrl) icon.src = item.iconUrl;
         const meta = document.createElement("div");
         meta.className = "meta";
         const title = document.createElement("div");
@@ -178,9 +222,17 @@
     function openActive() {
       if (filtered.length === 0) return;
       const item = filtered[active];
-      if (item && item.url) {
-        const url = "hammerspoon://edge-bookmarks-open?url=" + encodeURIComponent(item.url);
-        window.location = url;
+      if (!item) return;
+      if (mode === "ghostty") {
+        if (item.command) {
+          const url = "hammerspoon://ghostty-run?cmd=" + encodeURIComponent(item.command);
+          window.location = url;
+        }
+      } else {
+        if (item.url) {
+          const url = "hammerspoon://edge-bookmarks-open?url=" + encodeURIComponent(item.url);
+          window.location = url;
+        }
       }
     }
 
@@ -188,6 +240,10 @@
     inputEl.addEventListener("keydown", (e) => {
       if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+      else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        setMode(mode === "edge" ? "ghostty" : "edge");
+      }
       else if (e.key === "Enter") { e.preventDefault(); openActive(); }
       else if (e.metaKey && /^[1-9]$/.test(e.key)) {
         e.preventDefault();
@@ -203,15 +259,10 @@
       }
     });
 
-    window.addEventListener("keydown", (e) => {
-      if (e.metaKey && /^[1-9]$/.test(e.key)) {
-        e.preventDefault();
-        const idx = parseInt(e.key, 10) - 1;
-        if (filtered[idx]) {
-          active = idx;
-          openActive();
-        }
-      }
+    modeEls.forEach(el => {
+      el.addEventListener("mousedown", () => {
+        setMode(el.dataset.mode);
+      });
     });
 
     render();
