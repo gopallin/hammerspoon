@@ -1,6 +1,3 @@
-require("keybindings.scroll")
-require("keybindings.mouse")
-require("keybindings.grid")
-require("keybindings.edge_bookmarks")
+require("keybindings")
 
 require("lib.reload").start()

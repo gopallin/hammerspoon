@@ -34,5 +34,40 @@ function M.moveToGridPosition(key, rect)
   hs.mouse.setAbsolutePosition({x = x, y = y})
 end
 
-return M
+local moveSpeed = 3
+local moveInterval = 0.01
+local movingTimers = {}
 
+function M.leftClick()
+  M.mouseClick("left")
+end
+
+function M.rightClick()
+  M.mouseClick("right")
+end
+
+function M.startMove(key, dx, dy)
+  if movingTimers[key] then return end
+  movingTimers[key] = hs.timer.doEvery(moveInterval, function()
+    local pt = hs.mouse.getAbsolutePosition()
+    hs.mouse.setAbsolutePosition({ x = pt.x + dx, y = pt.y + dy })
+  end)
+end
+
+function M.stopMove(key)
+  if movingTimers[key] then
+    movingTimers[key]:stop()
+    movingTimers[key] = nil
+  end
+end
+
+function M.directions()
+  return {
+    W = { 0, -moveSpeed },
+    A = { -moveSpeed, 0 },
+    S = { 0, moveSpeed },
+    D = { moveSpeed, 0 },
+  }
+end
+
+return M

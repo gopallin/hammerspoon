@@ -1,10 +1,12 @@
-local utils = require("lib.utils")
+local mouse = require("lib.mouse")
+
+local M = {}
 
 local firstKey = nil
 local keyTimer = nil
 local inputTimeout = 1.0
 
-local function handleKey(key)
+function M.handleKey(key)
   local screen = hs.screen.mainScreen()
   local frame = screen:frame()
 
@@ -12,12 +14,12 @@ local function handleKey(key)
     firstKey = key
     if keyTimer then keyTimer:stop() end
     keyTimer = hs.timer.doAfter(inputTimeout, function()
-      utils.moveToGridPosition(firstKey, frame)
+      mouse.moveToGridPosition(firstKey, frame)
       firstKey = nil
     end)
   else
     if keyTimer then keyTimer:stop() end
-    local grid = utils.grid
+    local grid = mouse.grid
     local pos = grid[firstKey]
     if not pos then return end
     local firstRect = {
@@ -26,14 +28,9 @@ local function handleKey(key)
       w = frame.w / 3,
       h = frame.h / 3,
     }
-    utils.moveToGridPosition(key, firstRect)
+    mouse.moveToGridPosition(key, firstRect)
     firstKey = nil
   end
 end
 
-for i = 1, 9 do
-  hs.hotkey.bind({"option"}, tostring(i), function()
-    handleKey(i)
-  end)
-end
-
+return M
