@@ -84,24 +84,11 @@ end
 local webview_instance = nil
 local esc_hotkey = nil
 local focus_timer = nil
-local previous_input_source = nil
 
 local function close_webview()
   if focus_timer then
     focus_timer:stop()
     focus_timer = nil
-  end
-  if previous_input_source then
-    pcall(function()
-      if hs.keycodes and hs.keycodes.setInputSource then
-        hs.keycodes.setInputSource(previous_input_source)
-      elseif hs.keycodes and hs.keycodes.setLayout then
-        hs.keycodes.setLayout(previous_input_source)
-      elseif hs.keycodes and hs.keycodes.setMethod then
-        hs.keycodes.setMethod(previous_input_source)
-      end
-    end)
-    previous_input_source = nil
   end
   if webview_instance then
     webview_instance:delete()
@@ -165,16 +152,6 @@ function M.show()
 
   close_webview()
 
-  previous_input_source = (hs.keycodes and hs.keycodes.currentSourceID and hs.keycodes.currentSourceID()) or nil
-  pcall(function()
-    if hs.keycodes and hs.keycodes.setInputSource then
-      hs.keycodes.setInputSource("com.apple.keylayout.ABC")
-    elseif hs.keycodes and hs.keycodes.setLayout then
-      hs.keycodes.setLayout("ABC")
-    elseif hs.keycodes and hs.keycodes.setMethod then
-      hs.keycodes.setMethod("ABC")
-    end
-  end)
 
   local html, html_err = build_html(items)
   if not html then
