@@ -1,7 +1,7 @@
 local grid = require("lib.grid")
 local mouse = require("lib.mouse")
 local scroll = require("lib.scroll")
-local edge_bookmarks = require("lib.edge_bookmarks")
+local spotlight = require("lib.spotlight")
 
 for i = 1, 9 do
   hs.hotkey.bind({ "option" }, tostring(i), function()
@@ -30,5 +30,5 @@ hs.hotkey.bind({ "option" }, "H", function() scroll.left() end)
 hs.hotkey.bind({ "option" }, "L", function() scroll.right() end)
 
 hs.hotkey.bind({ "alt", "cmd" }, "space", function()
-  edge_bookmarks.show()
+  spotlight.show()
 end)
