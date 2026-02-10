@@ -1,0 +1,7 @@
+[
+  {
+    "name": "Home",
+    "subText": "~  •  cd",
+    "command": "cd ~"
+  }
+]

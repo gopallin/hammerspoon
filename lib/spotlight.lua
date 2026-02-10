@@ -25,7 +25,7 @@ local function edge_bookmarks_path()
 end
 
 local function ghostty_commands_path()
-  return expand_tilde("~/.hammerspoon/data/ghostty_commands.json")
+  return expand_tilde("~/.hammerspoon/spotlight_options/ghostty_commands.json")
 end
 
 local function extract_host(url)
@@ -127,14 +127,14 @@ local function close_webview()
   end
 end
 
-hs.urlevent.bind("edge-bookmarks-open", function(_, params)
+hs.urlevent.bind("spotlight-edge-open", function(_, params)
   if params and params.url then
     urlevent.openURL(params.url)
   end
   close_webview()
 end)
 
-hs.urlevent.bind("edge-bookmarks-close", function()
+hs.urlevent.bind("spotlight-close", function()
   close_webview()
 end)
 
@@ -153,7 +153,7 @@ local function run_ghostty_command(cmd)
   end)
 end
 
-hs.urlevent.bind("ghostty-run", function(_, params)
+hs.urlevent.bind("spotlight-ghostty-run", function(_, params)
   if params and params.cmd then
     run_ghostty_command(params.cmd)
   end
@@ -190,9 +190,9 @@ local function build_html(edge_items, ghostty_items)
     })
   end
 
-  local html = read_file(expand_tilde("~/.hammerspoon/html/edge_bookmarks.html"))
+  local html = read_file(expand_tilde("~/.hammerspoon/html/spotlight.html"))
   if not html then
-    return nil, "HTML template not found: ~/.hammerspoon/html/edge_bookmarks.html"
+    return nil, "HTML template not found: ~/.hammerspoon/html/spotlight.html"
   end
 
   local payload = json.encode({ edge = slim_edge, ghostty = slim_ghostty })

@@ -63,11 +63,22 @@
       border-radius: 8px;
       color: var(--subtext);
       user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      min-height: 22px;
     }
     .mode.active {
       color: var(--text);
       background: rgba(255, 255, 255, 0.7);
       box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+    }
+    .mode-icon {
+      width: 16px;
+      height: 16px;
+      object-fit: contain;
+      opacity: 0.9;
     }
     .list {
       display: flex;
@@ -132,8 +143,12 @@
     <div class="topbar">
       <input id="search" class="search" type="text" placeholder="Search" autofocus autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" />
       <div class="modes">
-        <div class="mode active" data-mode="edge">Edge</div>
-        <div class="mode" data-mode="ghostty">Ghostty</div>
+        <div class="mode active" data-mode="edge" title="Edge">
+          <img class="mode-icon" src="https://www.google.com/s2/favicons?sz=32&domain=edge.microsoft.com" alt="Edge" />
+        </div>
+        <div class="mode" data-mode="ghostty" title="Ghostty">
+          <img class="mode-icon" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><rect x='3' y='6' width='26' height='20' rx='4' fill='%231c1c1e'/><path d='M8 12l4 4-4 4' stroke='%23ffffff' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/><rect x='15' y='18' width='7' height='2' rx='1' fill='%23ffffff'/></svg>" alt="Ghostty" />
+        </div>
       </div>
     </div>
     <div id="list" class="list"></div>
@@ -225,12 +240,12 @@
       if (!item) return;
       if (mode === "ghostty") {
         if (item.command) {
-          const url = "hammerspoon://ghostty-run?cmd=" + encodeURIComponent(item.command);
+          const url = "hammerspoon://spotlight-ghostty-run?cmd=" + encodeURIComponent(item.command);
           window.location = url;
         }
       } else {
         if (item.url) {
-          const url = "hammerspoon://edge-bookmarks-open?url=" + encodeURIComponent(item.url);
+          const url = "hammerspoon://spotlight-edge-open?url=" + encodeURIComponent(item.url);
           window.location = url;
         }
       }
@@ -255,7 +270,7 @@
       }
       else if (e.key === "Escape") {
         e.preventDefault();
-        window.location = "hammerspoon://edge-bookmarks-close";
+        window.location = "hammerspoon://spotlight-close";
       }
     });
 
