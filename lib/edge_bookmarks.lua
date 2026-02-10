@@ -126,12 +126,13 @@ end)
 local function spotlight_frame()
   local scr = screen.mainScreen()
   local frame = scr:frame()
-  local width = math.floor(frame.w * 0.55)
+  local width = math.floor(frame.w * 0.385)
   local height = math.floor(frame.h * 0.25 * 2.5)
   local x = math.floor(frame.x + (frame.w - width) / 2)
   local y = math.floor(frame.y + frame.h * 0.18)
   return { x = x, y = y, w = width, h = height }
 end
+
 
 local function build_html(items)
   local slim = {}

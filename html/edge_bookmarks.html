@@ -67,6 +67,19 @@
       font-size: 12px;
       line-height: 16px;
       color: var(--subtext);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .hint {
+      font-size: 14px;
+      line-height: 18px;
+      font-weight: 600;
+      color: var(--text);
+      opacity: 0.9;
+      white-space: nowrap;
+      margin-left: 12px;
     }
   </style>
 </head>
@@ -95,6 +108,12 @@
         const sub = document.createElement("div");
         sub.className = "sub";
         sub.textContent = item.subText || "";
+        if (idx < 9) {
+          const hint = document.createElement("span");
+          hint.className = "hint";
+          hint.textContent = "⌘" + (idx + 1);
+          sub.appendChild(hint);
+        }
         row.appendChild(title);
         row.appendChild(sub);
         row.addEventListener("mousedown", () => {
