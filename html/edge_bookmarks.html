@@ -50,10 +50,26 @@
     }
     .item {
       display: flex;
-      flex-direction: column;
-      gap: 2px;
+      flex-direction: row;
+      align-items: center;
+      gap: 10px;
       padding: 8px 10px;
       border-radius: 10px;
+    }
+    .icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+      border-radius: 3px;
+      background: rgba(0, 0, 0, 0.06);
+      object-fit: contain;
+    }
+    .meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      flex: 1;
     }
     .item.active {
       background: var(--highlight);
@@ -102,6 +118,14 @@
       filtered.slice(0, 50).forEach((item, idx) => {
         const row = document.createElement("div");
         row.className = "item" + (idx === active ? " active" : "");
+        const icon = document.createElement("img");
+        icon.className = "icon";
+        icon.alt = "";
+        if (item.iconUrl) {
+          icon.src = item.iconUrl;
+        }
+        const meta = document.createElement("div");
+        meta.className = "meta";
         const title = document.createElement("div");
         title.className = "title";
         title.textContent = item.text || "";
@@ -114,8 +138,10 @@
           hint.textContent = "⌘" + (idx + 1);
           sub.appendChild(hint);
         }
-        row.appendChild(title);
-        row.appendChild(sub);
+        meta.appendChild(title);
+        meta.appendChild(sub);
+        row.appendChild(icon);
+        row.appendChild(meta);
         row.addEventListener("mousedown", () => {
           active = idx;
           openActive();

@@ -45,6 +45,7 @@ local function collect_bookmarks(node, out, folder)
     table.insert(out, {
       text = node.name,
       subText = (folder and (folder .. "  •  " .. host)) or host,
+      iconUrl = host and ("https://www.google.com/s2/favicons?sz=32&domain=" .. host) or nil,
       url = node.url,
     })
     return
@@ -140,6 +141,7 @@ local function build_html(items)
     table.insert(slim, {
       text = item.text,
       subText = item.subText,
+      iconUrl = item.iconUrl,
       url = item.url,
     })
   end
