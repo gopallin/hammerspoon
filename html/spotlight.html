@@ -176,10 +176,19 @@
         items = data.ghostty || [];
       } else if (mode === "edge") {
         items = data.edge || [];
+      } else if (mode === "search") {
+        items = data.history || [];
       } else {
         items = [];
       }
-      filtered = items;
+      
+      // If search mode, start with empty filtered list
+      if (mode === "search") {
+        filtered = [];
+      } else {
+        filtered = items;
+      }
+      
       active = 0;
       modeEls.forEach(el => el.classList.toggle("active", el.dataset.mode === mode));
       
@@ -189,7 +198,7 @@
         inputEl.placeholder = "Search";
       }
       
-      render();
+      filter();
     }
 
     function render() {
@@ -229,15 +238,9 @@
     }
 
     function filter() {
-      if (mode === "search") {
-        filtered = [];
-        active = 0;
-        render();
-        return;
-      }
       const q = inputEl.value.trim().toLowerCase();
       if (!q) {
-        filtered = items;
+        filtered = (mode === "search") ? [] : items;
         active = 0;
         render();
         return;
@@ -260,7 +263,7 @@
     }
 
     function openActive() {
-      if (mode === "search") {
+      if (mode === "search" && filtered.length === 0) {
         const q = inputEl.value.trim();
         if (q) {
           let url = q;
@@ -305,12 +308,12 @@
         setMode(MODES[(idx - 1 + MODES.length) % MODES.length]);
       }
       else if (e.key === "Tab") {
-        if (mode === "search") {
-          const q = inputEl.value.toLowerCase();
-          if (q === "chat") {
-            e.preventDefault();
-            inputEl.value = "chatgpt.com";
-          }
+        e.preventDefault();
+        if (filtered.length > 0 && active >= 0) {
+          const item = filtered[active];
+          // Autocomplete with domain if available, otherwise title
+          inputEl.value = item.subText || item.text;
+          filter();
         }
       }
       else if (e.key === "Enter") { e.preventDefault(); openActive(); }

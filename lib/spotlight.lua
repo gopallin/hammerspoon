@@ -85,6 +85,55 @@ local function load_edge_bookmarks()
   return items
 end
 
+local function load_edge_history(bookmark_items)
+  local bookmark_urls = {}
+  if bookmark_items then
+    for _, item in ipairs(bookmark_items) do
+      if item.url then bookmark_urls[item.url] = true end
+    end
+  end
+
+  local path = expand_tilde("~/Library/Application Support/Microsoft Edge/Default/History")
+  local tmp_path = os.tmpname()
+  
+  -- Use cp to avoid locking issues
+  local ok = os.execute(string.format('cp "%s" "%s" 2>/dev/null', path, tmp_path))
+  if not ok then
+    return {}
+  end
+
+  local db = hs.sqlite3.open(tmp_path)
+  if not db then
+    os.remove(tmp_path)
+    return {}
+  end
+
+  local items = {}
+  local sql = "SELECT title, url FROM urls ORDER BY last_visit_time DESC LIMIT 200"
+  for row in db:nrows(sql) do
+    local host = extract_host(row.url)
+    table.insert(items, {
+      text = row.title ~= "" and row.title or host,
+      subText = host,
+      url = row.url,
+      iconUrl = host and ("https://www.google.com/s2/favicons?sz=32&domain=" .. host) or nil,
+    })
+  end
+  db:close()
+  os.remove(tmp_path)
+  
+  -- Deduplicate by URL and exclude bookmarks
+  local seen = {}
+  local unique = {}
+  for _, item in ipairs(items) do
+    if not seen[item.url] and not bookmark_urls[item.url] then
+      seen[item.url] = true
+      table.insert(unique, item)
+    end
+  end
+  return unique
+end
+
 local function load_ghostty_commands()
   local path = ghostty_commands_path()
   local content = read_file(path)
@@ -170,10 +219,20 @@ local function spotlight_frame()
   return { x = x, y = y, w = width, h = height }
 end
 
-local function build_html(edge_items, ghostty_items)
+local function build_html(edge_items, history_items, ghostty_items)
   local slim_edge = {}
   for _, item in ipairs(edge_items) do
     table.insert(slim_edge, {
+      text = item.text,
+      subText = item.subText,
+      iconUrl = item.iconUrl,
+      url = item.url,
+    })
+  end
+
+  local slim_history = {}
+  for _, item in ipairs(history_items) do
+    table.insert(slim_history, {
       text = item.text,
       subText = item.subText,
       iconUrl = item.iconUrl,
@@ -195,7 +254,7 @@ local function build_html(edge_items, ghostty_items)
     return nil, "HTML template not found: ~/.hammerspoon/html/spotlight.html"
   end
 
-  local payload = json.encode({ edge = slim_edge, ghostty = slim_ghostty })
+  local payload = json.encode({ edge = slim_edge, history = slim_history, ghostty = slim_ghostty })
   payload = payload:gsub("%%", "%%%%")
   return html:gsub("__DATA__", payload, 1)
 end
@@ -207,11 +266,12 @@ function M.show()
     return
   end
 
+  local history_items = load_edge_history(edge_items)
   local ghostty_items = load_ghostty_commands()
 
   close_webview()
 
-  local html, html_err = build_html(edge_items, ghostty_items)
+  local html, html_err = build_html(edge_items, history_items, ghostty_items)
   if not html then
     hs.alert.show(html_err, 2)
     return
