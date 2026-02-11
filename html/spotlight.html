@@ -144,14 +144,14 @@
     <div class="topbar">
       <input id="search" class="search" type="text" placeholder="Search" autofocus autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" />
       <div class="modes">
-        <div class="mode active" data-mode="edge" title="Edge Bookmarks">
-          <img class="mode-icon" src="https://www.google.com/s2/favicons?sz=32&domain=edge.microsoft.com" alt="Edge" />
+        <div class="mode active" data-mode="safari" title="Safari Bookmarks">
+          <img class="mode-icon" src="https://www.google.com/s2/favicons?sz=32&domain=safari.com" alt="Safari" />
         </div>
         <div class="mode" data-mode="ghostty" title="Ghostty">
           <img class="mode-icon" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><rect x='3' y='6' width='26' height='20' rx='4' fill='%231c1c1e'/><path d='M8 12l4 4-4 4' stroke='%23ffffff' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/><rect x='15' y='18' width='7' height='2' rx='1' fill='%23ffffff'/></svg>" alt="Ghostty" />
         </div>
-        <div class="mode" data-mode="search" title="Edge Search">
-          <img class="mode-icon" src="https://www.google.com/s2/favicons?sz=32&domain=bing.com" alt="Search" />
+        <div class="mode" data-mode="search" title="Safari Search">
+          <img class="mode-icon" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='13' cy='13' r='8' stroke='%23ffffff' stroke-width='2' fill='none'/><line x1='19' y1='19' x2='26' y2='26' stroke='%23ffffff' stroke-width='2' stroke-linecap='round'/></svg>" alt="Search" />
         </div>
       </div>
     </div>
@@ -163,21 +163,23 @@
     const listEl = document.getElementById("list");
     const inputEl = document.getElementById("search");
     const modeEls = Array.from(document.querySelectorAll(".mode"));
-    let mode = "edge";
-    let items = data.edge || [];
+    let mode = "safari";
+    let items = data.safari || [];
     let filtered = items;
     let active = 0;
 
-    const MODES = ["edge", "ghostty", "search"];
+    const MODES = ["safari", "ghostty", "search"];
 
     function setMode(next) {
       mode = next;
       if (mode === "ghostty") {
         items = data.ghostty || [];
-      } else if (mode === "edge") {
-        items = data.edge || [];
+      } else if (mode === "safari") {
+        items = data.safari || [];
       } else if (mode === "search") {
-        items = data.history || [];
+        items = (data.history || [])
+          .sort((a, b) => (b.visitCount || 0) - (a.visitCount || 0))
+          .slice(0, 300); // Allow searching through more history
       } else {
         items = [];
       }
@@ -193,7 +195,7 @@
       modeEls.forEach(el => el.classList.toggle("active", el.dataset.mode === mode));
       
       if (mode === "search") {
-        inputEl.placeholder = "Search Edge or type URL";
+        inputEl.placeholder = "Search Safari or type URL";
       } else {
         inputEl.placeholder = "Search";
       }
@@ -245,11 +247,18 @@
         render();
         return;
       }
-      filtered = items.filter(item => {
+      let matches = items.filter(item => {
         const t = (item.text || "").toLowerCase();
         const s = (item.subText || "").toLowerCase();
         return t.includes(q) || s.includes(q);
       });
+      
+      if (mode === "search") {
+        filtered = matches.slice(0, 5);
+      } else {
+        filtered = matches;
+      }
+      
       active = 0;
       render();
     }
@@ -272,7 +281,7 @@
           } else if (!url.startsWith("http://") && !url.startsWith("https://")) {
             url = "https://" + url;
           }
-          window.location = "hammerspoon://spotlight-edge-open?url=" + encodeURIComponent(url);
+          window.location = "hammerspoon://spotlight-safari-open?url=" + encodeURIComponent(url);
         }
         return;
       }
@@ -287,7 +296,7 @@
         }
       } else {
         if (item.url) {
-          const url = "hammerspoon://spotlight-edge-open?url=" + encodeURIComponent(item.url);
+          const url = "hammerspoon://spotlight-safari-open?url=" + encodeURIComponent(item.url);
           window.location = url;
         }
       }

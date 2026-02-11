@@ -20,8 +20,8 @@ local function expand_tilde(path)
   return (path:gsub("^~", os.getenv("HOME") or ""))
 end
 
-local function edge_bookmarks_path()
-  return expand_tilde("~/Library/Application Support/Microsoft Edge/Default/Bookmarks")
+local function safari_bookmarks_path()
+  return expand_tilde("~/Library/Safari/Bookmarks.plist")
 end
 
 local function ghostty_commands_path()
@@ -39,53 +39,65 @@ local function extract_host(url)
   return url
 end
 
-local function collect_bookmarks(node, out, folder)
+local function collect_safari_bookmarks(node, out, folder)
   if type(node) ~= "table" then
     return
   end
 
-  if node.type == "url" and node.url and node.name then
-    local host = extract_host(node.url)
+  if node.WebBookmarkType == "WebBookmarkTypeLeaf" and node.URLString and node.URIDictionary then
+    local title = node.URIDictionary.title or node.Title
+    local url = node.URLString
+    local host = extract_host(url)
     table.insert(out, {
-      text = node.name,
+      text = title,
       subText = (folder and (folder .. "  •  " .. host)) or host,
-      iconUrl = host and ("https://www.google.com/s2/favicons?sz=32&domain=" .. host) or nil,
-      url = node.url,
+     iconUrl = host and ("https://www.google.com/s2/favicons?sz=32&domain=" .. host) or nil,
+      url = url,
     })
     return
   end
 
-  if node.name then
-    folder = folder and (folder .. "/" .. node.name) or node.name
+  local current_folder = folder
+  if node.WebBookmarkType == "WebBookmarkTypeFolder" and node.Title then
+    current_folder = folder and (folder .. "/" .. node.Title) or node.Title
   end
 
-  if node.children then
-    for _, child in ipairs(node.children) do
-      collect_bookmarks(child, out, folder)
+  if node.Children then
+    for _, child in ipairs(node.Children) do
+      collect_safari_bookmarks(child, out, current_folder)
     end
   end
 end
 
-local function load_edge_bookmarks()
-  local path = edge_bookmarks_path()
-  local content = read_file(path)
-  if not content then
-    return nil, ("Edge bookmarks not found at: " .. path)
+local function load_safari_bookmarks()
+  local path = safari_bookmarks_path()
+  local data = hs.plist.read(path)
+  
+  if not data then
+    -- Fallback: try copying to tmp (may help with permissions/locking)
+    local tmp_path = os.tmpname()
+    local ok = os.execute(string.format('cp "%s" "%s" 2>/dev/null', path, tmp_path))
+    if ok then
+      data = hs.plist.read(tmp_path)
+      os.remove(tmp_path)
+    end
   end
 
-  local data = json.decode(content)
-  if not data or not data.roots then
-    return nil, "Edge bookmarks file is invalid."
+  if not data then
+    return nil, ("Safari bookmarks not found or invalid at: " .. path)
   end
 
   local items = {}
-  collect_bookmarks(data.roots.bookmark_bar, items, "Favorites Bar")
-  collect_bookmarks(data.roots.other, items, "Other Favorites")
-  collect_bookmarks(data.roots.synced, items, "Synced Favorites")
+  -- Safari's Bookmarks.plist has a root 'Children' array
+  if data.Children then
+    for _, child in ipairs(data.Children) do
+      collect_safari_bookmarks(child, items)
+    end
+  end
   return items
 end
 
-local function load_edge_history(bookmark_items)
+local function load_safari_history(bookmark_items)
   local bookmark_urls = {}
   if bookmark_items then
     for _, item in ipairs(bookmark_items) do
@@ -93,7 +105,7 @@ local function load_edge_history(bookmark_items)
     end
   end
 
-  local path = expand_tilde("~/Library/Application Support/Microsoft Edge/Default/History")
+  local path = expand_tilde("~/Library/Safari/History.db")
   local tmp_path = os.tmpname()
   
   -- Use cp to avoid locking issues
@@ -109,13 +121,28 @@ local function load_edge_history(bookmark_items)
   end
 
   local items = {}
-  local sql = "SELECT title, url FROM urls ORDER BY last_visit_time DESC LIMIT 200"
+  -- Safari history schema: history_items join history_visits
+  local sql = [[
+    SELECT 
+        i.url, 
+        v.title, 
+        i.visit_count
+    FROM 
+        history_items i
+    JOIN 
+        history_visits v ON i.id = v.history_item
+    ORDER BY 
+        v.visit_time DESC 
+    LIMIT 300
+  ]]
+  
   for row in db:nrows(sql) do
     local host = extract_host(row.url)
     table.insert(items, {
-      text = row.title ~= "" and row.title or host,
+      text = (row.title and row.title ~= "") and row.title or host,
       subText = host,
       url = row.url,
+      visitCount = row.visit_count or 0,
       iconUrl = host and ("https://www.google.com/s2/favicons?sz=32&domain=" .. host) or nil,
     })
   end
@@ -176,7 +203,7 @@ local function close_webview()
   end
 end
 
-hs.urlevent.bind("spotlight-edge-open", function(_, params)
+hs.urlevent.bind("spotlight-safari-open", function(_, params)
   if params and params.url then
     urlevent.openURL(params.url)
   end
@@ -219,10 +246,10 @@ local function spotlight_frame()
   return { x = x, y = y, w = width, h = height }
 end
 
-local function build_html(edge_items, history_items, ghostty_items)
-  local slim_edge = {}
-  for _, item in ipairs(edge_items) do
-    table.insert(slim_edge, {
+local function build_html(safari_items, history_items, ghostty_items)
+  local slim_safari = {}
+  for _, item in ipairs(safari_items) do
+    table.insert(slim_safari, {
       text = item.text,
       subText = item.subText,
       iconUrl = item.iconUrl,
@@ -237,6 +264,7 @@ local function build_html(edge_items, history_items, ghostty_items)
       subText = item.subText,
       iconUrl = item.iconUrl,
       url = item.url,
+      visitCount = item.visitCount,
     })
   end
 
@@ -254,24 +282,26 @@ local function build_html(edge_items, history_items, ghostty_items)
     return nil, "HTML template not found: ~/.hammerspoon/html/spotlight.html"
   end
 
-  local payload = json.encode({ edge = slim_edge, history = slim_history, ghostty = slim_ghostty })
+  local payload = json.encode({ safari = slim_safari, history = slim_history, ghostty = slim_ghostty })
   payload = payload:gsub("%%", "%%%%")
   return html:gsub("__DATA__", payload, 1)
 end
 
 function M.show()
-  local edge_items, edge_err = load_edge_bookmarks()
-  if not edge_items then
-    hs.alert.show(edge_err, 2)
-    return
+  local safari_items, safari_err = load_safari_bookmarks()
+  if not safari_items then
+    -- It's possible Safari bookmarks are not accessible due to Sandbox/Permissions
+    -- But we try anyway.
+    hs.alert.show(safari_err or "Error loading Safari bookmarks", 2)
+    safari_items = {}
   end
 
-  local history_items = load_edge_history(edge_items)
+  local history_items = load_safari_history(safari_items)
   local ghostty_items = load_ghostty_commands()
 
   close_webview()
 
-  local html, html_err = build_html(edge_items, history_items, ghostty_items)
+  local html, html_err = build_html(safari_items, history_items, ghostty_items)
   if not html then
     hs.alert.show(html_err, 2)
     return
