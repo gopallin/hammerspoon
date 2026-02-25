@@ -47,6 +47,25 @@ local modifierKeyCodes = {
     [63] = true,  -- Function
 }
 
+local function resolveKeyText(keyCode, char)
+    if specialKeys[keyCode] then
+        return specialKeys[keyCode]
+    end
+
+    -- Use typed character when printable.
+    if char and #char > 0 and char:match("[%g%s]") then
+        return char
+    end
+
+    -- Fallback for control-combos and other non-printables.
+    local keyName = hs.keycodes.map[keyCode]
+    if type(keyName) == "string" and #keyName > 0 then
+        return keyName
+    end
+
+    return ""
+end
+
 -- UI
 local function createKeyCanvas()
     local screen = hs.screen.mainScreen()
@@ -171,7 +190,7 @@ function M.start()
             if flags.shift and (keyCode > 50) then prefix = prefix .. "⇧" end
         end
 
-        local finalChar = specialKeys[keyCode] or (char and #char > 0 and char or "")
+        local finalChar = resolveKeyText(keyCode, char)
 
         if finalChar ~= "" then
             table.insert(charBuffer, {
