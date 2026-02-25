@@ -8,11 +8,11 @@ local isPrivacyMode = false
 
 -- --- Configuration ---
 local DISPLAY_TIMEOUT = 1.0     -- Seconds before display hides after typing stops
-local FONT_SIZE = 22            -- Increased font size for better readability
+local FONT_SIZE = 25            -- Increased font size for better readability
 local BACKGROUND_ALPHA = 0.3    -- Translucent black background
-local MAX_BUFFER = 20           -- Strict character limit for the FIFO queue
-local CANVAS_WIDTH = 150        -- Fixed box width
-local CANVAS_HEIGHT = 35        -- Fixed box height
+local MAX_BUFFER = 15           -- Strict character limit for the FIFO queue
+local CANVAS_WIDTH = 170        -- Fixed box width
+local CANVAS_HEIGHT = 38        -- Fixed box height
 
 -- Mapping for special non-printable keys
 local specialKeys = {
@@ -21,10 +21,27 @@ local specialKeys = {
     [49] = "␣",   -- Space
     [51] = "⌫",   -- Backspace
     [53] = "⎋",   -- Escape
+    [56] = "⇧",   -- Left Shift
+    [60] = "⇧",   -- Right Shift
+    [59] = "⌃",   -- Left Control
+    [62] = "⌃",   -- Right Control
+    [63] = "fn",  -- Function
     [123] = "←",  -- Left
     [124] = "→",  -- Right
     [125] = "↓",  -- Down
     [126] = "↑",  -- Up
+}
+
+local modifierKeyCodes = {
+    [54] = true,  -- Right Command
+    [55] = true,  -- Left Command
+    [56] = true,  -- Left Shift
+    [58] = true,  -- Left Option
+    [59] = true,  -- Left Control
+    [60] = true,  -- Right Shift
+    [61] = true,  -- Right Option
+    [62] = true,  -- Right Control
+    [63] = true,  -- Function
 }
 
 -- --- UI Creation ---
@@ -70,7 +87,8 @@ end
 
 -- --- Content Processing ---
 local function getDisplayString()
-    local fullStr = table.concat(charBuffer, "")
+    -- Add spacing between buffered key tokens for wider visual tracking
+    local fullStr = table.concat(charBuffer, "  ")
     -- Auto-mask if system Secure Input is on or manual Privacy Mode is active
     if hs.eventtap.isSecureInputEnabled() or isPrivacyMode then
         -- Mask alphanumeric characters with dots, preserve UI symbols
@@ -111,13 +129,15 @@ function M.start()
         local char = event:getCharacters()
         local flags = event:getFlags()
 
-        -- Capture modifier prefixes
+        -- Capture modifier prefixes for non-modifier keys
         local prefix = ""
-        if flags.cmd then prefix = prefix .. "⌘" end
-        if flags.alt then prefix = prefix .. "⌥" end
-        if flags.ctrl then prefix = prefix .. "⌃" end
-        -- Filter shift prefix for simple letter typing
-        if flags.shift and (keyCode > 50) then prefix = prefix .. "⇧" end
+        if not modifierKeyCodes[keyCode] then
+            if flags.cmd then prefix = prefix .. "⌘" end
+            if flags.alt then prefix = prefix .. "⌥" end
+            if flags.ctrl then prefix = prefix .. "⌃" end
+            -- Filter shift prefix for simple letter typing
+            if flags.shift and (keyCode > 50) then prefix = prefix .. "⇧" end
+        end
 
         local finalChar = specialKeys[keyCode] or (char and #char > 0 and char or "")
 
