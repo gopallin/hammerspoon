@@ -1,31 +1,33 @@
 local M = {}
 
 local keyCanvas = nil
-local keyTimer = nil
-local charBuffer = {} -- Table used as a true FIFO buffer
+local charBuffer = {} -- FIFO queue: { text = "...", t = epochSeconds }
 local eventTap = nil
+local expireTimer = nil
 local isPrivacyMode = false
 
--- --- Configuration ---
-local DISPLAY_TIMEOUT = 1.0     -- Seconds before display hides after typing stops
-local FONT_SIZE = 25            -- Increased font size for better readability
-local BACKGROUND_ALPHA = 0.3    -- Translucent black background
-local MAX_BUFFER = 15           -- Strict character limit for the FIFO queue
-local CANVAS_WIDTH = 170        -- Fixed box width
-local CANVAS_HEIGHT = 38        -- Fixed box height
+-- Configuration
+local FONT_SIZE = 25
+local BACKGROUND_ALPHA = 0.3
+local CHAR_BUFFER_LENGTH = 8
+local CHAR_TTL_SECONDS = 1.5
+local EXPIRE_CHECK_INTERVAL = 0.2
+local CANVAS_WIDTH = 170
+local CANVAS_HEIGHT = 38
 
--- Mapping for special non-printable keys
+-- Special non-printable keys
 local specialKeys = {
     [36] = "↩",   -- Return
     [48] = "⇥",   -- Tab
     [49] = "␣",   -- Space
     [51] = "⌫",   -- Backspace
     [53] = "⎋",   -- Escape
+    [57] = "⇪",   -- Caps Lock
     [56] = "⇧",   -- Left Shift
     [60] = "⇧",   -- Right Shift
     [59] = "⌃",   -- Left Control
     [62] = "⌃",   -- Right Control
-    [63] = "fn",  -- Function
+    [63] = "🌐",  -- Globe / Function
     [123] = "←",  -- Left
     [124] = "→",  -- Right
     [125] = "↓",  -- Down
@@ -36,6 +38,7 @@ local modifierKeyCodes = {
     [54] = true,  -- Right Command
     [55] = true,  -- Left Command
     [56] = true,  -- Left Shift
+    [57] = true,  -- Caps Lock
     [58] = true,  -- Left Option
     [59] = true,  -- Left Control
     [60] = true,  -- Right Shift
@@ -44,7 +47,7 @@ local modifierKeyCodes = {
     [63] = true,  -- Function
 }
 
--- --- UI Creation ---
+-- UI
 local function createKeyCanvas()
     local screen = hs.screen.mainScreen()
     local f = screen:fullFrame()
@@ -64,7 +67,7 @@ local function createKeyCanvas()
         roundedRectRadii = {xRadius = 12, yRadius = 12},
     }
 
-    -- Text layer (Right Aligned for FIFO feel)
+    -- Text layer (right-aligned for FIFO)
     keyCanvas[2] = {
         type = "text",
         text = "",
@@ -85,23 +88,31 @@ local function createKeyCanvas()
     }
 end
 
--- --- Content Processing ---
+-- Content
 local function getDisplayString()
-    -- Add spacing between buffered key tokens for wider visual tracking
-    local fullStr = table.concat(charBuffer, "  ")
-    -- Auto-mask if system Secure Input is on or manual Privacy Mode is active
+    local pieces = {}
+    for i = 1, #charBuffer do
+        pieces[#pieces + 1] = charBuffer[i].text
+    end
+    -- Add spacing between tokens
+    local fullStr = table.concat(pieces, "  ")
+    -- Mask typed characters when secure mode is on
     if hs.eventtap.isSecureInputEnabled() or isPrivacyMode then
-        -- Mask alphanumeric characters with dots, preserve UI symbols
         return fullStr:gsub("[^⌘⌥⌃⇧↩⇥␣⌫⎋←→↓↑%s]", "*")
     end
     return fullStr
 end
 
--- --- Update Display (FIFO Mechanism) ---
+-- Display
 local function updateDisplay()
     if not keyCanvas then createKeyCanvas() end
 
-    -- Update Privacy Icon visibility
+    if #charBuffer == 0 then
+        if keyCanvas:isShowing() then keyCanvas:hide() end
+        return
+    end
+
+    -- Update privacy icon visibility
     local isProtected = hs.eventtap.isSecureInputEnabled() or isPrivacyMode
     keyCanvas[3].textColor.alpha = isProtected and 1 or 0
 
@@ -111,62 +122,73 @@ local function updateDisplay()
     if not keyCanvas:isShowing() then
         keyCanvas:show()
     end
+end
 
-    -- Manage visibility timer
-    if keyTimer then keyTimer:stop() end
-    keyTimer = hs.timer.doAfter(DISPLAY_TIMEOUT, function()
-        keyCanvas:hide()
-        charBuffer = {} -- Clear the FIFO buffer when display expires
-    end)
+local function pruneExpiredChars()
+    local now = hs.timer.secondsSinceEpoch()
+    local changed = false
+    while #charBuffer > 0 do
+        local item = charBuffer[1]
+        if (now - item.t) >= CHAR_TTL_SECONDS then
+            table.remove(charBuffer, 1)
+            changed = true
+        else
+            break
+        end
+    end
+    return changed
 end
 
 function M.togglePrivacy()
     isPrivacyMode = not isPrivacyMode
-    charBuffer = {} -- Flush buffer on mode change for security
+    charBuffer = {} -- Flush buffer on mode change
     hs.alert.show(isPrivacyMode and "Privacy Mode ON 🔒" or "Privacy Mode OFF")
     updateDisplay()
 end
 
 function M.start()
     if eventTap then eventTap:stop() end
+    if expireTimer then expireTimer:stop() end
 
-    -- --- Capture Keyboard Events ---
+    expireTimer = hs.timer.doEvery(EXPIRE_CHECK_INTERVAL, function()
+        if pruneExpiredChars() then
+            updateDisplay()
+        end
+    end)
+
+    -- Capture keyDown events
     eventTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
         local keyCode = event:getKeyCode()
         local char = event:getCharacters()
         local flags = event:getFlags()
 
-        -- Capture modifier prefixes for non-modifier keys
+        -- Prefix modifiers for non-modifier keys
         local prefix = ""
         if not modifierKeyCodes[keyCode] then
             if flags.cmd then prefix = prefix .. "⌘" end
             if flags.alt then prefix = prefix .. "⌥" end
             if flags.ctrl then prefix = prefix .. "⌃" end
-            -- Filter shift prefix for simple letter typing
             if flags.shift and (keyCode > 50) then prefix = prefix .. "⇧" end
         end
 
         local finalChar = specialKeys[keyCode] or (char and #char > 0 and char or "")
 
         if finalChar ~= "" then
-            -- FIFO Logic: Add to end
-            table.insert(charBuffer, prefix .. finalChar)
+            table.insert(charBuffer, {
+                text = prefix .. finalChar,
+                t = hs.timer.secondsSinceEpoch(),
+            })
 
-            -- FIFO Logic: Forcefully remove oldest if buffer exceeds MAX_BUFFER
-            -- This provides instant replacement of old characters with new ones
-            while #charBuffer > MAX_BUFFER do
+            -- Keep only newest N chars
+            while #charBuffer > CHAR_BUFFER_LENGTH do
                 table.remove(charBuffer, 1)
             end
 
+            pruneExpiredChars()
             updateDisplay()
-        elseif keyCode == 51 then -- Handle Backspace (⌫)
-            if #charBuffer > 0 then
-                table.remove(charBuffer)
-                updateDisplay()
-            end
         end
 
-        return false -- Do not block the keystroke from reaching apps
+        return false -- Do not block keystrokes
     end)
     eventTap:start()
 
@@ -174,8 +196,8 @@ end
 
 function M.stop()
     if eventTap then eventTap:stop() end
+    if expireTimer then expireTimer:stop() end
     if keyCanvas then keyCanvas:delete() end
-    if keyTimer then keyTimer:stop() end
 end
 
 return M
