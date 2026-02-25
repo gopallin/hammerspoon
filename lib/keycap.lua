@@ -70,7 +70,7 @@ local function createKeyCanvas()
         text = "",
         textFont = ".AppleSystemUIFont",
         textSize = FONT_SIZE,
-        textColor = {white = 1, alpha = 1},
+        textColor = {white = 1, alpha = 0.7},
         textAlignment = "right",
         frame = {x = "5%", y = "10%", w = "82%", h = "80%"}
     }
@@ -92,7 +92,7 @@ local function getDisplayString()
     -- Auto-mask if system Secure Input is on or manual Privacy Mode is active
     if hs.eventtap.isSecureInputEnabled() or isPrivacyMode then
         -- Mask alphanumeric characters with dots, preserve UI symbols
-        return fullStr:gsub("[^⌘⌥⌃⇧↩⇥␣⌫⎋←→↓↑%s]", "•")
+        return fullStr:gsub("[^⌘⌥⌃⇧↩⇥␣⌫⎋←→↓↑%s]", "*")
     end
     return fullStr
 end
@@ -118,6 +118,13 @@ local function updateDisplay()
         keyCanvas:hide()
         charBuffer = {} -- Clear the FIFO buffer when display expires
     end)
+end
+
+function M.togglePrivacy()
+    isPrivacyMode = not isPrivacyMode
+    charBuffer = {} -- Flush buffer on mode change for security
+    hs.alert.show(isPrivacyMode and "Privacy Mode ON 🔒" or "Privacy Mode OFF")
+    updateDisplay()
 end
 
 function M.start()
@@ -163,13 +170,6 @@ function M.start()
     end)
     eventTap:start()
 
-    -- Manual Privacy Toggle: Option + Cmd + P
-    hs.hotkey.bind({"alt", "cmd"}, "P", function()
-        isPrivacyMode = not isPrivacyMode
-        charBuffer = {} -- Flush buffer on mode change for security
-        hs.alert.show(isPrivacyMode and "Privacy Mode ON 🔒" or "Privacy Mode OFF")
-        updateDisplay()
-    end)
 end
 
 function M.stop()
