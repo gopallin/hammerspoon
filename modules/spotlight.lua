@@ -25,7 +25,7 @@ local function safari_bookmarks_path()
 end
 
 local function ghostty_commands_path()
-  return expand_tilde("~/.hammerspoon/spotlight_options/ghostty_commands.json")
+  return expand_tilde("~/.hammerspoon/modules/spotlight/config/ghostty_commands.json")
 end
 
 local function extract_host(url)
@@ -277,9 +277,9 @@ local function build_html(safari_items, history_items, ghostty_items)
     })
   end
 
-  local html = read_file(expand_tilde("~/.hammerspoon/html/spotlight.html"))
+  local html = read_file(expand_tilde("~/.hammerspoon/modules/spotlight/spotlight.html"))
   if not html then
-    return nil, "HTML template not found: ~/.hammerspoon/html/spotlight.html"
+    return nil, "HTML template not found: ~/.hammerspoon/modules/spotlight/spotlight.html"
   end
 
   local payload = json.encode({ safari = slim_safari, history = slim_history, ghostty = slim_ghostty })
