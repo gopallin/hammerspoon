@@ -1,8 +1,8 @@
-local grid = require("lib.grid")
-local mouse = require("lib.mouse")
-local scroll = require("lib.scroll")
-local spotlight = require("lib.spotlight")
-local keycap = require("lib.keycap")
+local grid = require("modules.grid")
+local mouse = require("modules.mouse")
+local scroll = require("modules.scroll")
+local spotlight = require("modules.spotlight")
+local keycap = require("modules.keycap")
 
 for i = 1, 9 do
   hs.hotkey.bind({ "option" }, tostring(i), function()

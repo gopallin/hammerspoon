@@ -1,4 +1,4 @@
-local mouse = require("lib.mouse")
+local mouse = require("modules.mouse")
 
 local M = {}
 

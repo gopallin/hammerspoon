@@ -31,7 +31,7 @@ function M.moveToGridPosition(key, rect)
   if not pos then return end
   local x = rect.x + (rect.w / 3) * pos[1] + rect.w / 6
   local y = rect.y + (rect.h / 3) * pos[2] + rect.h / 6
-  hs.mouse.setAbsolutePosition({x = x, y = y})
+  hs.mouse.absolutePosition({x = x, y = y})
 end
 
 local moveSpeed = 3
@@ -49,8 +49,8 @@ end
 function M.startMove(key, dx, dy)
   if movingTimers[key] then return end
   movingTimers[key] = hs.timer.doEvery(moveInterval, function()
-    local pt = hs.mouse.getAbsolutePosition()
-    hs.mouse.setAbsolutePosition({ x = pt.x + dx, y = pt.y + dy })
+    local pt = hs.mouse.absolutePosition()
+    hs.mouse.absolutePosition({ x = pt.x + dx, y = pt.y + dy })
   end)
 end
 
