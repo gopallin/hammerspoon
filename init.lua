@@ -1,4 +1,4 @@
-require("keybindings")
+require("config.keybindings")
 
-require("lib.reload").start()
-require("lib.keycap").start()
+require("modules.reload").start()
+require("modules.keycap").start()
