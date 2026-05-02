@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cat Gatekeeper - 休息提醒</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, rgba(0, 0, 0, 0.9) 0%, rgba(30, 30, 40, 0.9) 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .cat-animation {
+            width: 280px;
+            height: 280px;
+            margin: 0 auto 30px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        .cat-animation img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #333;
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+
+        .message {
+            font-size: 16px;
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .stats {
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            text-align: left;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-size: 15px;
+        }
+
+        .stat-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .stat-label {
+            color: #888;
+            font-weight: 500;
+        }
+
+        .stat-value {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: #FF6B6B;
+            color: white;
+            flex: 1;
+            max-width: 200px;
+        }
+
+        .btn-primary:hover {
+            background: #FF5252;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(255, 107, 107, 0.3);
+        }
+
+        .btn-secondary {
+            background: #E0E0E0;
+            color: #333;
+            flex: 1;
+            max-width: 200px;
+        }
+
+        .btn-secondary:hover {
+            background: #D0D0D0;
+            transform: translateY(-2px);
+        }
+
+        .shortcut-hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 30px 20px;
+                max-width: 90vw;
+            }
+
+            .cat-animation {
+                width: 200px;
+                height: 200px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="cat-animation">
+            <img src="__CAT_GIF__" alt="Cat taking a break" />
+        </div>
+
+        <h1>🎉 休息時間到了！</h1>
+
+        <div class="message">
+            你已經連續工作很久了。<br>
+            站起來活動一下，休息一下眼睛吧！
+        </div>
+
+        <div class="stats">
+            <div class="stat-row">
+                <span class="stat-label">今日使用時間：</span>
+                <span class="stat-value">__TOTAL_TIME__</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">每日限制：</span>
+                <span class="stat-value">__LIMIT_TIME__</span>
+            </div>
+        </div>
+
+        <div class="button-group">
+            <button class="btn-primary" onclick="closeReminder()">關閉提醒</button>
+            <button class="btn-secondary" onclick="snooze()">10 分鐘後提醒</button>
+        </div>
+
+        <div class="shortcut-hint">
+            按 ESC 鍵可關閉提醒
+        </div>
+    </div>
+
+    <script>
+        function closeReminder() {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeCallback) {
+                window.webkit.messageHandlers.closeCallback.postMessage({});
+            } else {
+                window.close();
+            }
+        }
+
+        function snooze() {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.snoozeCallback) {
+                window.webkit.messageHandlers.snoozeCallback.postMessage({});
+            }
+            closeReminder();
+        }
+
+        // Close on ESC key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeReminder();
+            }
+        });
+    </script>
+</body>
+</html>
