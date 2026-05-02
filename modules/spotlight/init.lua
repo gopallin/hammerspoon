@@ -72,7 +72,7 @@ end
 local function load_safari_bookmarks()
   local path = safari_bookmarks_path()
   local data = hs.plist.read(path)
-  
+
   if not data then
     -- Fallback: try copying to tmp (may help with permissions/locking)
     local tmp_path = os.tmpname()
@@ -107,7 +107,7 @@ local function load_safari_history(bookmark_items)
 
   local path = expand_tilde("~/Library/Safari/History.db")
   local tmp_path = os.tmpname()
-  
+
   -- Use cp to avoid locking issues
   local ok = os.execute(string.format('cp "%s" "%s" 2>/dev/null', path, tmp_path))
   if not ok then
@@ -123,19 +123,19 @@ local function load_safari_history(bookmark_items)
   local items = {}
   -- Safari history schema: history_items join history_visits
   local sql = [[
-    SELECT 
-        i.url, 
-        v.title, 
+    SELECT
+        i.url,
+        v.title,
         i.visit_count
-    FROM 
+    FROM
         history_items i
-    JOIN 
+    JOIN
         history_visits v ON i.id = v.history_item
-    ORDER BY 
-        v.visit_time DESC 
+    ORDER BY
+        v.visit_time DESC
     LIMIT 300
   ]]
-  
+
   for row in db:nrows(sql) do
     local host = extract_host(row.url)
     table.insert(items, {
@@ -148,7 +148,7 @@ local function load_safari_history(bookmark_items)
   end
   db:close()
   os.remove(tmp_path)
-  
+
   -- Deduplicate by URL and exclude bookmarks
   local seen = {}
   local unique = {}

@@ -1,12 +1,11 @@
 local M = {}
 
 local keyCanvas = nil
-local statusCanvas = nil -- New canvas for custom alerts
-local statusTimer = nil
 local charBuffer = {}
 local eventTap = nil
 local expireTimer = nil
 local isPrivacyMode = false
+local notification = require("modules.notification")
 
 -- Keycap Configuration (Bottom-Right)
 local FONT_SIZE = 25
@@ -16,14 +15,6 @@ local CHAR_TTL_SECONDS = 1.5
 local EXPIRE_CHECK_INTERVAL = 0.2
 local CANVAS_WIDTH = 170
 local CANVAS_HEIGHT = 38
-
--- Status Alert Configuration (Top-Right - You can adjust these)
-local STATUS_W = 220       -- 固定寬度
-local STATUS_H = 50        -- 固定高度
-local STATUS_X_OFFSET = 40 -- 距離右邊界的距離
-local STATUS_Y_OFFSET = 40 -- 距離上邊界的距離
-local STATUS_BG_ALPHA = 0.7
-local STATUS_DURATION = 2.0 -- 顯示秒數
 
 -- Special non-printable keys
 local specialKeys = {
@@ -116,49 +107,6 @@ local function createKeyCanvas()
         }
 end
 
--- UI: Custom Status Alert (Top-Right)
-local function createStatusCanvas()
-    local screen = hs.screen.mainScreen()
-    local f = screen:fullFrame()
-
-    -- Calculate position: Top-Right
-    local x = f.w - STATUS_W - STATUS_X_OFFSET
-    local y = STATUS_Y_OFFSET
-
-    statusCanvas = hs.canvas.new({x = x, y = y, w = STATUS_W, h = STATUS_H})
-    statusCanvas:level(hs.drawing.windowLevels.overlay)
-
-    -- Background
-    statusCanvas[1] = {
-        type = "rectangle",
-        action = "fill",
-        fillColor = {white = 0, alpha = STATUS_BG_ALPHA},
-        roundedRectRadii = {xRadius = 10, yRadius = 10},
-    }
-
-    -- Text
-    statusCanvas[2] = {
-        type = "text",
-        text = "",
-        textFont = ".AppleSystemUIFontBold",
-        textSize = 18,
-        textColor = {white = 1, alpha = 1},
-        textAlignment = "center",
-        frame = {x = "0%", y = "25%", w = "100%", h = "50%"}
-    }
-end
-
-local function showCustomStatus(message)
-    if not statusCanvas then createStatusCanvas() end
-    if statusTimer then statusTimer:stop() end
-
-    statusCanvas[2].text = message
-    statusCanvas:show()
-
-    statusTimer = hs.timer.doAfter(STATUS_DURATION, function()
-        statusCanvas:hide()
-    end)
-end
 
 -- Content
 local function getDisplayString(isProtected)
@@ -203,9 +151,8 @@ function M.togglePrivacy()
     isPrivacyMode = not isPrivacyMode
     charBuffer = {}
 
-    -- Using custom status instead of hs.alert.show
     local msg = isPrivacyMode and "Privacy Mode ON 🔒" or "Privacy Mode OFF"
-    showCustomStatus(msg)
+    notification.showStatus(msg)
 
     updateDisplay()
 end
@@ -244,7 +191,6 @@ function M.stop()
     if eventTap then eventTap:stop() end
     if expireTimer then expireTimer:stop() end
     if keyCanvas then keyCanvas:delete() end
-    if statusCanvas then statusCanvas:delete() end
 end
 
 return M
