@@ -35,11 +35,6 @@
     "command": "sudo nvim ~/nx/nxl-picking-car-mobile-device"
   },
   {
-    "name": "ssh gopal@claw.local",
-    "subText": "ssh gopal@claw.local",
-    "command": "ssh gopal@claw.local"
-  },
-  {
     "name": "bash clean script",
     "subText": "bash ~/.scripts/clean_mac.sh",
     "command": "bash ~/.scripts/clean_mac.sh"
@@ -48,10 +43,5 @@
     "name": "nvim .hammerspoon",
     "subText": "sudo nvim ~/.hammerspoon/spotlight_options/ghostty_commands.json",
     "command": "sudo nvim ~/.hammerspoon/spotlight_options/ghostty_commands.json"
-  },
-  {
-    "name": "btop",
-    "subText": "btop",
-    "command": "btop"
   }
 ]
