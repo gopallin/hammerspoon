@@ -9,7 +9,7 @@ local prevRx, prevTx, prevTime = nil, nil, nil
 local BAR_HEIGHT = 20
 local FONT_SIZE = 14
 local BACKGROUND_ALPHA = 0.55
-local REFRESH_INTERVAL = 2
+local REFRESH_INTERVAL = 5
 -- Gap inserted between each metric segment; widen/narrow to taste.
 local SEPARATOR = "                 "
 

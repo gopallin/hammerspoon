@@ -4,10 +4,12 @@ local watcher = nil
 function M.start()
   local function reloadConfig(files)
     for _, file in ipairs(files) do
+      if file:find("/data/") then goto continue end
       if file:sub(-4) == ".lua" or file:sub(-5) == ".html" or file:sub(-5) == ".json" then
         hs.reload()
         return
       end
+      ::continue::
     end
   end
 
