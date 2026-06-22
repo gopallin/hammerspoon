@@ -2,6 +2,10 @@ local M = {}
 
 local barCanvas = nil
 local refreshTimer = nil
+-- Mouse dodge: hide the bar while the cursor is over it, restore once it leaves.
+local mouseWatcher = nil
+local barFrame = nil
+local hiddenByMouse = false
 -- Network counters are cumulative; we cache the previous sample to derive a rate.
 local prevRx, prevTx, prevTime = nil, nil, nil
 
@@ -38,10 +42,8 @@ end
 
 local function createCanvas()
     local f = hs.screen.mainScreen():fullFrame()
-    barCanvas = hs.canvas.new({
-        x = f.x, y = f.y + f.h - BAR_HEIGHT,
-        w = f.w, h = BAR_HEIGHT
-    })
+    barFrame = {x = f.x, y = f.y + f.h - BAR_HEIGHT, w = f.w, h = BAR_HEIGHT}
+    barCanvas = hs.canvas.new(barFrame)
     barCanvas:level(hs.canvas.windowLevels.floating)
     barCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
     barCanvas[1] = {
@@ -106,16 +108,37 @@ local function runUpdate()
     end, {"-c", METRICS_SCRIPT}):start()
 end
 
+local function startMouseWatcher()
+    mouseWatcher = hs.eventtap.new({hs.eventtap.event.types.mouseMoved}, function()
+        if not (barCanvas and barFrame) then return false end
+        local p = hs.mouse.absolutePosition()
+        local over = p.x >= barFrame.x and p.x <= barFrame.x + barFrame.w
+            and p.y >= barFrame.y and p.y <= barFrame.y + barFrame.h
+        if over and not hiddenByMouse then
+            hiddenByMouse = true
+            barCanvas:hide()
+        elseif not over and hiddenByMouse then
+            hiddenByMouse = false
+            barCanvas:show()
+        end
+        return false
+    end)
+    mouseWatcher:start()
+end
+
 function M.start()
     if refreshTimer then refreshTimer:stop() end
     createCanvas()
     runUpdate()
     refreshTimer = hs.timer.doEvery(REFRESH_INTERVAL, runUpdate)
+    startMouseWatcher()
 end
 
 function M.stop()
     if refreshTimer then refreshTimer:stop(); refreshTimer = nil end
+    if mouseWatcher then mouseWatcher:stop(); mouseWatcher = nil end
     if barCanvas then barCanvas:delete(); barCanvas = nil end
+    barFrame, hiddenByMouse = nil, false
     prevRx, prevTx, prevTime = nil, nil, nil
 end
 
