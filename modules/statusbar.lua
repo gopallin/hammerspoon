@@ -85,13 +85,14 @@ local function render(stdOut)
 
     local battery = hs.battery.percentage()
     local batText = battery and string.format("%d%%", math.floor(battery + 0.5)) or "--"
+    local batPrefix = hs.battery.isCharging() and "⚡ " or ""
 
     local segments = {
         string.format("CPU %d%%", math.floor(cpu + 0.5)),
         string.format("MEM %d%%", mem),
         string.format("↓ %s  ↑ %s", formatRate(downRate), formatRate(upRate)),
         string.format("SSD %d%%", disk),
-        string.format("BAT %s", batText),
+        string.format("%sBAT %s", batPrefix, batText),
     }
     local text = table.concat(segments, SEPARATOR)
 
