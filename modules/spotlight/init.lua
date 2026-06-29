@@ -1,7 +1,6 @@
 local json = require("hs.json")
 local screen = require("hs.screen")
 local webview = require("hs.webview")
-local urlevent = require("hs.urlevent")
 local application = require("hs.application")
 
 local M = {}
@@ -203,9 +202,39 @@ local function close_webview()
   end
 end
 
+local function applescript_escape(s)
+  return (s:gsub("\\", "\\\\"):gsub('"', '\\"'))
+end
+
+local function open_in_safari(url)
+  local script = string.format([[
+    set targetURL to "%s"
+    tell application "Safari"
+      activate
+      if (count of windows) is 0 then
+        make new document with properties {URL:targetURL}
+        return
+      end if
+      set curTab to current tab of front window
+      set curURL to ""
+      try
+        set curURL to (URL of curTab) as text
+      end try
+      if curURL is "" or curURL is "about:blank" or curURL starts with "favorites://" or curURL starts with "topsites://" then
+        set URL of curTab to targetURL
+      else
+        tell front window
+          set current tab to (make new tab with properties {URL:targetURL})
+        end tell
+      end if
+    end tell
+  ]], applescript_escape(url))
+  hs.osascript.applescript(script)
+end
+
 hs.urlevent.bind("spotlight-safari-open", function(_, params)
   if params and params.url then
-    urlevent.openURL(params.url)
+    open_in_safari(params.url)
   end
   close_webview()
 end)
