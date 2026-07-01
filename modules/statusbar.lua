@@ -4,6 +4,7 @@ local barCanvas = nil
 local refreshTimer = nil
 -- Mouse dodge: hide the bar while the cursor is over it, restore once it leaves.
 local mouseWatcher = nil
+local screenWatcher = nil
 local barFrame = nil
 local hiddenByMouse = false
 -- Network counters are cumulative; we cache the previous sample to derive a rate.
@@ -63,6 +64,16 @@ local function createCanvas()
     barCanvas:show()
 end
 
+local function updateCanvasFrame()
+    if not barCanvas then return end
+    local f = hs.screen.mainScreen():fullFrame()
+    local expectedFrame = {x = f.x, y = f.y + f.h - BAR_HEIGHT, w = f.w, h = BAR_HEIGHT}
+    if not barFrame or barFrame.x ~= expectedFrame.x or barFrame.y ~= expectedFrame.y or barFrame.w ~= expectedFrame.w or barFrame.h ~= expectedFrame.h then
+        barFrame = expectedFrame
+        barCanvas:frame(barFrame)
+    end
+end
+
 local function render(stdOut)
     local fields = {}
     for part in stdOut:gmatch("[^|]+") do fields[#fields + 1] = part end
@@ -98,7 +109,11 @@ local function render(stdOut)
     }
     local text = table.concat(segments, SEPARATOR)
 
-    if not barCanvas then createCanvas() end
+    if not barCanvas then
+        createCanvas()
+    else
+        updateCanvasFrame()
+    end
     barCanvas[2].text = text
 end
 
@@ -128,15 +143,21 @@ end
 
 function M.start()
     if refreshTimer then refreshTimer:stop() end
+    if screenWatcher then screenWatcher:stop() end
     createCanvas()
     runUpdate()
     refreshTimer = hs.timer.doEvery(REFRESH_INTERVAL, runUpdate)
     startMouseWatcher()
+    screenWatcher = hs.screen.watcher.new(function()
+        updateCanvasFrame()
+    end)
+    screenWatcher:start()
 end
 
 function M.stop()
     if refreshTimer then refreshTimer:stop(); refreshTimer = nil end
     if mouseWatcher then mouseWatcher:stop(); mouseWatcher = nil end
+    if screenWatcher then screenWatcher:stop(); screenWatcher = nil end
     if barCanvas then barCanvas:delete(); barCanvas = nil end
     barFrame, hiddenByMouse = nil, false
     prevRx, prevTx, prevTime = nil, nil, nil
