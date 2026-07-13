@@ -12,12 +12,15 @@ mkdir -p "$(dirname "$LOG")"
 
 echo "--- Insight started at $(date) ---" >> "$LOG"
 
-# Run built-in /insights command — writes to ~/.claude/usage-data/report.html
-"$CLAUDE" -p "/insights" >> "$LOG" 2>&1
+# Run built-in /insights command and capture output to extract the actual report filename
+CLAUDE_OUTPUT=$("$CLAUDE" -p "/insights" 2>&1)
+echo "$CLAUDE_OUTPUT" >> "$LOG"
 
-if [ ! -s "$REPORT" ]; then
-    echo "ERROR: report.html not found or empty, aborting upload." >> "$LOG"
-    osascript -e "display notification \"report.html missing, upload skipped.\" with title \"Insight Reporter\""
+REPORT=$(echo "$CLAUDE_OUTPUT" | grep -oE 'file://[^ ]+\.html' | sed 's|^file://||' | head -n 1)
+
+if [ -z "$REPORT" ] || [ ! -s "$REPORT" ]; then
+    echo "ERROR: report html not found or empty, aborting upload." >> "$LOG"
+    osascript -e "display notification \"report html missing, upload skipped.\" with title \"Insight Reporter\""
     exit 1
 fi
 
