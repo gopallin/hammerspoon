@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+  video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+</style>
+</head>
+<body>
+  <video loop muted playsinline preload="auto">
+    <source src="__VIDEO_SRC__">
+  </video>
+  <script>
+    // No autoplay: play/pause is driven from Lua after load so a battery/sleep
+    // pause holds a still frame with no flash. Seeking once forces WKWebView to
+    // paint the first frame, so a paused start shows the video instead of black.
+    var v = document.querySelector('video');
+    v.addEventListener('loadeddata', function () {
+      try { v.currentTime = 0.03; } catch (e) {}
+    });
+  </script>
+</body>
+</html>
