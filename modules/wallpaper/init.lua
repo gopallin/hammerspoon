@@ -210,6 +210,10 @@ local function startWatchers()
             setReason("sleep", true)
         elseif event == e.systemDidWake or event == e.screensDidWake then
             setReason("sleep", false)
+            -- Power source can change while asleep (e.g. plugged in overnight)
+            -- without firing the battery watcher, leaving a stale "battery"
+            -- pause; re-read it on wake so AC power resumes playback.
+            setReason("battery", hs.battery.powerSource() == "Battery Power")
             rebuildWebview()
         end
     end)
