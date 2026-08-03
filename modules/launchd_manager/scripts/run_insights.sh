@@ -27,7 +27,7 @@ fi
 # Upload report (retry up to 3 times with exponential backoff)
 REMOTE="user@REDACTED-HOST:/var/www/REDACTED/${DATE}_report.html"
 SSH_OPTS="-i $HOME/.ssh/REDACTED-KEY -o ConnectTimeout=10 -o TCPKeepAlive=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=5 -o StrictHostKeyChecking=accept-new"
-MAX_ATTEMPTS=3
+MAX_ATTEMPTS=5
 SCP_STATUS=1
 
 # Pre-flight check: verify SSH connectivity before attempting upload
@@ -38,8 +38,8 @@ if [ $? -ne 0 ]; then
     sleep 30
 fi
 
-# Exponential backoff retry strategy: 10s, 60s, 120s
-BACKOFF_TIMES=(10 60 120)
+# Exponential backoff retry strategy: 15s, 60s, 180s, 300s
+BACKOFF_TIMES=(15 60 180 300)
 
 for ATTEMPT in $(seq 1 $MAX_ATTEMPTS); do
     echo "Upload attempt $ATTEMPT/$MAX_ATTEMPTS at $(date)" >> "$LOG"
