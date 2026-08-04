@@ -81,6 +81,27 @@ local function isPaused()
     return next(pauseReasons) ~= nil
 end
 
+-- Sorted, comma-joined view of the active pause reasons for logging. Empty when
+-- nothing is pausing. Lets a log line show the WHOLE reason set, not just the
+-- one reason that happened to flip isPaused().
+local function reasonsString()
+    local keys = {}
+    for k in pairs(pauseReasons) do keys[#keys + 1] = k end
+    table.sort(keys)
+    return #keys > 0 and table.concat(keys, ",") or "none"
+end
+
+-- Map a numeric hs.caffeinate.watcher event back to its constant name, so log
+-- lines read "systemDidWake" instead of an opaque integer. Built by reversing
+-- the watcher's own integer constants (name -> number).
+local function caffeinateEventName(event)
+    local w = hs.caffeinate.watcher
+    for name, value in pairs(w) do
+        if type(value) == "number" and value == event then return name end
+    end
+    return "unknown(" .. tostring(event) .. ")"
+end
+
 -- Reflect the current pause-reason set onto the live <video> element.
 local function applyPlayback()
     if not instance then return end
@@ -92,11 +113,11 @@ local function applyPlayback()
 end
 
 local function setReason(reason, active)
-    local was = isPaused()
     if active then pauseReasons[reason] = true else pauseReasons[reason] = nil end
-    if isPaused() ~= was then
-        print(string.format("[wallpaper] paused=%s (%s -> %s)", tostring(isPaused()), reason, tostring(active)))
-    end
+    -- Log EVERY call (not just isPaused() flips): a reason set/cleared while
+    -- already paused was previously silent, which hid stuck reasons in the log.
+    print(string.format("[wallpaper] setReason %s=%s -> paused=%s reasons={%s}",
+        reason, tostring(active), tostring(isPaused()), reasonsString()))
     applyPlayback()
 end
 
@@ -198,7 +219,9 @@ local function startWatchers()
 
     -- On battery power -> pause.
     batteryWatcher = hs.battery.watcher.new(function()
-        setReason("battery", hs.battery.powerSource() == "Battery Power")
+        local src = hs.battery.powerSource()
+        print(string.format("[wallpaper] battery watcher fired: powerSource=%s", tostring(src)))
+        setReason("battery", src == "Battery Power")
     end)
     batteryWatcher:start()
     setReason("battery", hs.battery.powerSource() == "Battery Power")
@@ -206,6 +229,10 @@ local function startWatchers()
     -- Sleep -> pause; wake -> resume and rebuild (WKWebView drops the frame on wake).
     caffeinateWatcher = hs.caffeinate.watcher.new(function(event)
         local e = hs.caffeinate.watcher
+        -- Log EVERY caffeinate event by name (incl. ones we don't act on), so a
+        -- missed/unexpected wake event is visible when diagnosing a stuck pause.
+        print(string.format("[wallpaper] caffeinate event=%s powerSource=%s reasons={%s}",
+            caffeinateEventName(event), tostring(hs.battery.powerSource()), reasonsString()))
         if event == e.systemWillSleep or event == e.screensDidSleep then
             setReason("sleep", true)
         elseif event == e.systemDidWake or event == e.screensDidWake then
