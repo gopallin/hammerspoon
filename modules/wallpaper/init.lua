@@ -17,7 +17,8 @@ local M = {}
 
 -- State
 local instance = nil          -- current hs.webview, or nil when wallpaper is off
-local windowFilter = nil
+local spacesWatcher = nil
+local fullscreenTimer = nil
 local batteryWatcher = nil
 local caffeinateWatcher = nil
 local screenWatcher = nil
@@ -28,6 +29,7 @@ local WALLPAPER_DIR = "~/.hammerspoon/data/wallpaper"
 local TEMPLATE_PATH = "~/.hammerspoon/modules/wallpaper/wallpaper.html"
 local GENERATED_PAGE = "_wallpaper.html"   -- written into WALLPAPER_DIR, beside videos
 local EXTENSIONS = { mp4 = true, mov = true, m4v = true, webm = true }
+local FULLSCREEN_RECHECK_INTERVAL = 30     -- seconds; safety net, see startWatchers
 
 local function expandTilde(path)
     return (path:gsub("^~", os.getenv("HOME") or ""))
@@ -121,6 +123,35 @@ local function setReason(reason, active)
     applyPlayback()
 end
 
+-- True when the space currently shown on the wallpaper's screen is a fullscreen
+-- or tiled app space, i.e. the desktop is covered and the wallpaper is invisible.
+--
+-- This is queried, never accumulated. The previous version paired
+-- windowFullscreened/windowUnfullscreened events into a boolean, but macOS emits
+-- no windowUnfullscreened when a fullscreen window is merely closed, so the flag
+-- stuck at true and held the video paused for over two hours, surviving
+-- sleep/wake and AC/battery changes. State that is re-read cannot desynchronise.
+--
+-- hs.window.allWindows() is deliberately NOT used to answer this: it only sees
+-- the current Mission Control space, and a fullscreen window lives in its own.
+--
+-- On error it answers false (play) rather than true: a wallpaper that animates
+-- while hidden wastes some battery, one that is wrongly paused looks broken.
+local function onFullscreenSpace()
+    local space = hs.spaces.activeSpaceOnScreen()
+    if not space then return false end
+    return hs.spaces.spaceType(space) == "fullscreen"
+end
+
+-- Silent when nothing changed, so the periodic recheck cannot drown out the log
+-- that the other pause reasons are diagnosed from.
+local function refreshFullscreenReason()
+    local active = onFullscreenSpace()
+    if active ~= (pauseReasons.fullscreen or false) then
+        setReason("fullscreen", active)
+    end
+end
+
 -- Build the player page next to the video and return its file:// URL, or nil.
 local function preparePage()
     local dir = expandTilde(WALLPAPER_DIR)
@@ -208,14 +239,16 @@ local function rebuildWebview()
 end
 
 local function startWatchers()
-    -- Fullscreen app -> pause (nothing of the wallpaper is visible anyway).
-    windowFilter = hs.window.filter.new()
-    windowFilter:subscribe(hs.window.filter.windowFullscreened, function()
-        setReason("fullscreen", true)
-    end)
-    windowFilter:subscribe(hs.window.filter.windowUnfullscreened, function()
-        setReason("fullscreen", false)
-    end)
+    -- Fullscreen/tiled space showing -> pause (the wallpaper is covered anyway).
+    -- Watching space changes rather than window events also fixes a case window
+    -- events never reported at all: switching to an ALREADY-OPEN fullscreen app.
+    spacesWatcher = hs.spaces.watcher.new(refreshFullscreenReason)
+    spacesWatcher:start()
+
+    -- Safety net for a missed space change: worst case the wallpaper corrects
+    -- itself within 30s instead of staying stuck until the next config reload.
+    fullscreenTimer = hs.timer.doEvery(FULLSCREEN_RECHECK_INTERVAL, refreshFullscreenReason)
+    refreshFullscreenReason()
 
     -- On battery power -> pause.
     batteryWatcher = hs.battery.watcher.new(function()
@@ -254,7 +287,8 @@ local function startWatchers()
 end
 
 local function stopWatchers()
-    if windowFilter then windowFilter:unsubscribeAll(); windowFilter = nil end
+    if spacesWatcher then spacesWatcher:stop(); spacesWatcher = nil end
+    if fullscreenTimer then fullscreenTimer:stop(); fullscreenTimer = nil end
     if batteryWatcher then batteryWatcher:stop(); batteryWatcher = nil end
     if caffeinateWatcher then caffeinateWatcher:stop(); caffeinateWatcher = nil end
     if screenWatcher then screenWatcher:stop(); screenWatcher = nil end
