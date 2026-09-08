@@ -147,6 +147,33 @@ local function pruneExpiredChars()
     return changed
 end
 
+-- The expiry timer only has work to do while something is on screen, so it only
+-- exists then. It used to be created once in M.start() and left running for the
+-- life of the session: 5 wake-ups a second, forever, and on an empty buffer
+-- pruneExpiredChars() returns immediately, so all five did nothing. That made
+-- this module the largest single source of timer wake-ups in the whole config
+-- once countdown_snake learned to pause -- 25x the snake's idle rate -- and it
+-- kept firing with the display asleep. Wake-up count is what keeps a CPU out of
+-- its deep idle states, whether or not the callback does any work.
+local function stopExpireTimer()
+    if expireTimer then expireTimer:stop(); expireTimer = nil end
+end
+
+local function syncExpireTimer()
+    if #charBuffer > 0 then
+        if not expireTimer then
+            expireTimer = hs.timer.doEvery(EXPIRE_CHECK_INTERVAL, function()
+                if pruneExpiredChars() then updateDisplay() end
+                -- Reached empty: nothing left to expire, so stop rather than
+                -- keep polling. updateDisplay() has already hidden the canvas.
+                if #charBuffer == 0 then stopExpireTimer() end
+            end)
+        end
+    else
+        stopExpireTimer()
+    end
+end
+
 function M.togglePrivacy()
     isPrivacyMode = not isPrivacyMode
     charBuffer = {}
@@ -155,15 +182,12 @@ function M.togglePrivacy()
     notification.showStatus(msg)
 
     updateDisplay()
+    syncExpireTimer()   -- buffer was just cleared, so this stops the timer
 end
 
 function M.start()
-    if eventTap then eventTap:stop() end
-    if expireTimer then expireTimer:stop() end
+    M.stop()
     charBuffer = {}
-    expireTimer = hs.timer.doEvery(EXPIRE_CHECK_INTERVAL, function()
-        if pruneExpiredChars() then updateDisplay() end
-    end)
     eventTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
         local keyCode = event:getKeyCode()
         local char = event:getCharacters()
@@ -181,6 +205,7 @@ function M.start()
             while #charBuffer > CHAR_BUFFER_LENGTH do table.remove(charBuffer, 1) end
             pruneExpiredChars()
             updateDisplay()
+            syncExpireTimer()   -- buffer is non-empty, so this starts the timer
         end
         return false
     end)
@@ -188,9 +213,12 @@ function M.start()
 end
 
 function M.stop()
-    if eventTap then eventTap:stop() end
-    if expireTimer then expireTimer:stop() end
-    if keyCanvas then keyCanvas:delete() end
+    if eventTap then eventTap:stop(); eventTap = nil end
+    stopExpireTimer()
+    -- nil it too: updateDisplay() recreates the canvas when this is nil, and
+    -- leaving a deleted canvas object here meant later calls poked a dead one.
+    if keyCanvas then keyCanvas:delete(); keyCanvas = nil end
+    charBuffer = {}
 end
 
 return M
