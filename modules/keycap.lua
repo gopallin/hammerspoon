@@ -152,7 +152,7 @@ end
 -- life of the session: 5 wake-ups a second, forever, and on an empty buffer
 -- pruneExpiredChars() returns immediately, so all five did nothing. That made
 -- this module the largest single source of timer wake-ups in the whole config
--- once countdown_snake learned to pause -- 25x the snake's idle rate -- and it
+-- once countdown_chyron learned to pause -- 25x the chyron's idle rate -- and it
 -- kept firing with the display asleep. Wake-up count is what keeps a CPU out of
 -- its deep idle states, whether or not the callback does any work.
 local function stopExpireTimer()
