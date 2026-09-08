@@ -35,5 +35,5 @@ hs.hotkey.bind({ "alt", "cmd" }, "space", function()
 end)
 
 hs.hotkey.bind({ "alt", "cmd" }, "P", function()
-  keycap.togglePrivacy()
+  keycap.cyclePrivacy()
 end)

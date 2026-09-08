@@ -37,12 +37,21 @@
   ignoring `data/`, `.git/` and `.claude/`.
 - `notification.lua`: queued canvas toasts (top-right).
 - `keycap.lua`: on-screen key display and privacy masking.
-    - Privacy: manual toggle (alt-cmd-P), OS secure-input detection, and an
-      accessibility probe for password-ish fields.
+    - Privacy: a three-state cycle (alt-cmd-P) over `auto` / `always` / `reveal`,
+      OS secure-input detection, and an accessibility probe for password-ish
+      fields. `reveal` only sees through an *unknown* focus state; a field the
+      probe or the OS positively identified as secure stays masked in every mode.
     - The accessibility probe is **cached** and invalidated on app switch, mouse
       down and focus-moving keys. It must never run per keystroke: it is a
       synchronous IPC inside an event tap, and macOS disables a tap that blocks.
-    - It **fails closed** — an unreadable focus state masks the output.
+    - It **fails closed** — an unreadable focus state masks the output, which is
+      why `reveal` has to exist: apps that publish no focused element (Safari was
+      one) are unreadable, and without an override there was no way back to
+      plaintext keycaps.
+    - The probe calls `hs.axuielement.systemWideElement()`. There is no
+      `systemElement()` — the module called that for months, the `pcall` ate the
+      throw, and the probe never inspected a single field. Fail-open hid it;
+      7d58136's fail-closed turned it into "everything is masked, forever".
 - `statusbar.lua`: bottom bar (CPU/MEM/net/disk/battery). `hs.host` in-process
   for CPU and memory; one `hs.task` for the rest, with `df` on a slower cadence.
 - `countdown_chyron.lua`: vertical scrolling countdown near the right edge.
@@ -60,7 +69,7 @@
 - Option + W/A/S/D: continuous mouse move while held.
 - Option + H/J/K/L: scroll left/up/down/right.
 - Alt + Cmd + Space: open spotlight webview.
-- Alt + Cmd + P: toggle keycap privacy mode.
+- Alt + Cmd + P: cycle keycap privacy mode (auto → always → reveal).
 - Alt + Cmd + D: toggle countdown chyron.
 
 ## Spotlight UI/Behavior
