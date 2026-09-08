@@ -1,5 +1,10 @@
 local M = {}
 
+-- How long a synthetic click holds the button down. Kept well under the old
+-- 100ms because nothing needs that long, and it is now a scheduled delay rather
+-- than a blocking sleep (see M.mouseClick).
+local CLICK_HOLD_SECONDS = 0.03
+
 M.grid = {
   [1] = {0, 0}, [2] = {1, 0}, [3] = {2, 0},
   [4] = {0, 1}, [5] = {1, 1}, [6] = {2, 1},
@@ -21,9 +26,15 @@ function M.mouseClick(button)
     return
   end
 
+  -- Deliberately doAfter, NOT hs.timer.usleep: usleep blocks Hammerspoon's main
+  -- runloop, so the 100ms sleep that used to be here froze every timer and --
+  -- worse -- every eventtap in the config (keycap's keyDown tap, statusbar's
+  -- mouseMoved tap). A keyDown tap that stops responding delays the keystroke
+  -- reaching the app, and macOS disables taps that stay unresponsive.
   hs.eventtap.event.newMouseEvent(downEvent, pt):post()
-  hs.timer.usleep(100000)
-  hs.eventtap.event.newMouseEvent(upEvent, pt):post()
+  hs.timer.doAfter(CLICK_HOLD_SECONDS, function()
+    hs.eventtap.event.newMouseEvent(upEvent, pt):post()
+  end)
 end
 
 function M.moveToGridPosition(key, rect)
