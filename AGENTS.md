@@ -41,13 +41,30 @@
       OS secure-input detection, and an accessibility probe for password-ish
       fields. `reveal` only sees through an *unknown* focus state; a field the
       probe or the OS positively identified as secure stays masked in every mode.
-    - The accessibility probe is **cached** and invalidated on app switch, mouse
-      down and focus-moving keys. It must never run per keystroke: it is a
-      synchronous IPC inside an event tap, and macOS disables a tap that blocks.
+    - The accessibility probe **never runs inside the event tap** — not merely
+      "not on every keystroke". It is cached, invalidated on app switch, mouse
+      down and focus-moving keys, and a cache miss now schedules the probe on the
+      next runloop turn (`hs.timer.doAfter(0, …)`) for the *next* keystroke
+      instead of blocking the current one. A keyDown callback runs before the
+      keystroke reaches the app, so anything it waits for is input latency.
+    - Why that is not negotiable: the spotlight panel is a webview owned by
+      Hammerspoon, so while it is open Hammerspoon is the frontmost app and the
+      probe asked HS's main thread for its own focused element while that same
+      thread sat in the tap awaiting the reply. Nothing could answer until a
+      timeout, and macOS meanwhile gave up on the unresponsive tap and released
+      the key itself — a ~1s stall on the first character typed into spotlight.
+      A global AX messaging timeout (`setTimeout` on the systemwide element,
+      which is what sets the global default) bounds the main-thread cost too.
+    - An in-flight probe is tagged with a generation counter, bumped by every
+      invalidation, so an answer about the field focus just LEFT cannot land as
+      though it described the new one.
     - It **fails closed** — an unreadable focus state masks the output, which is
       why `reveal` has to exist: apps that publish no focused element (Safari was
       one) are unreadable, and without an override there was no way back to
-      plaintext keycaps.
+      plaintext keycaps. A cache MISS is unreadable too, so the first character
+      after focus moves is masked for a few milliseconds until the async answer
+      lands. A positive `yes` stays sticky once it has aged out, and only a
+      *fresh* `no` may reveal anything — an expired `no` is treated as unknown.
     - The probe calls `hs.axuielement.systemWideElement()`. There is no
       `systemElement()` — the module called that for months, the `pcall` ate the
       throw, and the probe never inspected a single field. Fail-open hid it;
@@ -78,6 +95,12 @@
 - Ghostty commands from `modules/spotlight/config/ghostty_commands.json`
   (gitignored; see `.example`).
 - Renders `spotlight.html`; modes: Safari, Ghostty, Search.
+- **No remote asset may appear in `spotlight.html`.** Every icon is an inline
+  `data:image/svg+xml` URI. Favicons were fetched from Google, handing it the
+  domain of every bookmark and of the 300 newest history entries on each open;
+  7d58136 turned that off in `init.lua` (`USE_REMOTE_FAVICONS`) but missed one
+  hardcoded favicon URL still in the HTML, so the panel kept beaconing Google on
+  every open. Turning a fetch off in the Lua does not turn it off in the page.
 
 ### Security invariant for the URL handlers
 `hs.urlevent` handlers are a public entry point — **any** process or web page

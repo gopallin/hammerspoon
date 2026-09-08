@@ -6,6 +6,10 @@ local eventTap = nil
 local focusChangeTap = nil
 local appWatcher = nil
 local expireTimer = nil
+-- Forward declaration: the async protection probe finishes AFTER the keystroke
+-- that triggered it has already been drawn, so it needs to redraw the buffer
+-- with the answer that arrived, and it is defined long before the drawing code.
+local updateDisplay
 -- "auto"   -- trust the probe; an unreadable focus state masks (fail closed)
 -- "always" -- mask everything, whatever the probe says
 -- "reveal" -- show through an UNKNOWN focus state; a positively detected
@@ -26,6 +30,15 @@ local CANVAS_HEIGHT = 38
 -- move focus happens (see invalidateProtection), so this is what bounds the
 -- damage from a focus change none of those signals caught -- not the normal path.
 local AX_PROBE_MAX_AGE = 0.5
+
+-- Every accessibility query is a synchronous IPC to whatever process owns the
+-- focused element, and the OS default timeout for one is measured in SECONDS.
+-- The probe no longer runs on the keystroke path, but it still runs on
+-- Hammerspoon's one and only main thread, so an app that never answers must not
+-- be allowed to hold the entire config still while it declines to. Applied to
+-- the systemwide element, which is what sets the global default for every
+-- element derived from it (hs.axuielement:setTimeout).
+local AX_MESSAGING_TIMEOUT = 0.2
 
 -- Special non-printable keys
 local specialKeys = {
@@ -70,11 +83,42 @@ local focusChangingKeyCodes = {
 -- that can actually change the answer: a different app coming forward, a mouse
 -- click landing somewhere new, or a focus-moving key. Steady-state typing --
 -- thousands of keystrokes into one field -- now costs zero AX calls.
+--
+-- Caching the answer was only half of it. The probe still RAN from inside the
+-- keyDown callback whenever the cache missed, and a keyDown tap runs before the
+-- keystroke reaches the app -- so every millisecond the probe spends is a
+-- millisecond of input latency, and the cache misses on exactly the keystroke a
+-- user notices most: the first one after focus moved.
+--
+-- The spotlight panel is the worst case and is how this was found. That panel is
+-- a webview owned by Hammerspoon, so while it is open Hammerspoon IS the
+-- frontmost app, and the probe asked Hammerspoon's main thread for its own
+-- focused element while that same thread sat inside the tap waiting for the
+-- reply. Nothing could reply until the AX timeout expired; by then macOS had
+-- given up on the unresponsive tap (kCGEventTapDisabledByTimeout) and released
+-- the keystroke on its own. That is the ~1s stall before the first typed
+-- character appeared, and the second character onwards was instant because the
+-- cache was warm by then.
+--
+-- So the cache is now the ONLY thing the hot path reads. A miss refreshes it for
+-- the NEXT keystroke rather than blocking this one, and a miss reads as
+-- "unknown", which still fails closed -- the character is masked until the probe
+-- says it is safe, never revealed in advance of that.
 local cachedAxProtected = nil
 local cachedAxTime = 0
+local axProbeInFlight = false
+-- Held in a module local rather than left anonymous: an hs.timer that nothing
+-- references is eligible for collection before it ever fires.
+local axProbeTimer = nil
+
+-- Bumped by every invalidation. A probe that was already in flight when focus
+-- moved is answering a question about the field we just LEFT, so its answer must
+-- not be allowed to land as though it described the new one.
+local axProbeGeneration = 0
 
 local function invalidateProtection()
     cachedAxProtected = nil
+    axProbeGeneration = axProbeGeneration + 1
 end
 
 -- Answers "is the focused element a password-ish field" as one of three values:
@@ -119,6 +163,37 @@ local function probeAxProtected()
     return result and "yes" or "no"
 end
 
+-- Runs the probe on the next turn of the runloop instead of in the caller. The
+-- caller is usually the keyDown tap, which must return NOW; the answer is only
+-- needed in time to redraw, and a redraw a few milliseconds later is invisible.
+local function refreshProtectionAsync()
+    if axProbeInFlight then return end
+    axProbeInFlight = true
+    local generation = axProbeGeneration
+    axProbeTimer = hs.timer.doAfter(0, function()
+        axProbeTimer = nil
+        local answer = probeAxProtected()
+        -- Cleared only once the query has actually come back, so the flag means
+        -- "a probe is running" for the whole time one is. Nothing else can run
+        -- on Hammerspoon's single runloop while the line above blocks, so the
+        -- order does not change behaviour today -- but a flag that lies for the
+        -- duration of the call it guards is one refactor away from being a bug.
+        axProbeInFlight = false
+        -- Focus moved while we were asking. Discard: the cache is already nil
+        -- and nil is the safe answer.
+        if generation ~= axProbeGeneration then return end
+
+        local previous = cachedAxProtected
+        cachedAxProtected = answer
+        cachedAxTime = hs.timer.secondsSinceEpoch()
+        -- Whatever is on screen was drawn against the miss. Redraw only when the
+        -- answer actually changes something, and note this cannot recurse: the
+        -- cache is fresh now, so updateDisplay() will not ask for another
+        -- refresh.
+        if answer ~= previous and #charBuffer > 0 then updateDisplay() end
+    end)
+end
+
 local function isProtected()
     -- Both of these are cheap local reads, so they stay on the hot path and are
     -- never cached: a manual toggle or macOS secure input must take effect on
@@ -128,13 +203,16 @@ local function isProtected()
     if hs.eventtap.isSecureInputEnabled() then return true end
 
     local now = hs.timer.secondsSinceEpoch()
-    if cachedAxProtected == nil or (now - cachedAxTime) > AX_PROBE_MAX_AGE then
-        cachedAxProtected = probeAxProtected()
-        cachedAxTime = now
-    end
+    local fresh = cachedAxProtected ~= nil and (now - cachedAxTime) <= AX_PROBE_MAX_AGE
+    if not fresh then refreshProtectionAsync() end
 
+    -- A positive "yes" is evidence, and it does not stop being evidence by
+    -- ageing out -- an expired "yes" keeps masking while the refresh is in
+    -- flight. Only a FRESH "no" is allowed to reveal anything; a stale one is
+    -- treated as unknown, which is stricter than the version that blocked the
+    -- keystroke to re-ask.
     if cachedAxProtected == "yes" then return true end
-    if cachedAxProtected == "no" then return false end
+    if fresh and cachedAxProtected == "no" then return false end
     -- Unknown: still fail closed, unless the user explicitly asked to see
     -- through it. That choice cannot uncover a field we DID recognise -- both
     -- hard signals above have already returned by this point.
@@ -204,7 +282,7 @@ local function getDisplayString(isProtected)
 end
 
 -- Display
-local function updateDisplay()
+updateDisplay = function()
     if not keyCanvas then createKeyCanvas() end
     if #charBuffer == 0 then
         if keyCanvas:isShowing() then keyCanvas:hide() end
@@ -285,6 +363,12 @@ function M.start()
     charBuffer = {}
     invalidateProtection()
 
+    -- Before the tap that can trigger a probe exists, so no query is ever issued
+    -- under the multi-second OS default.
+    pcall(function()
+        hs.axuielement.systemWideElement():setTimeout(AX_MESSAGING_TIMEOUT)
+    end)
+
     eventTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
         local keyCode = event:getKeyCode()
         local char = event:getCharacters()
@@ -330,6 +414,8 @@ function M.start()
 end
 
 function M.stop()
+    if axProbeTimer then axProbeTimer:stop(); axProbeTimer = nil end
+    axProbeInFlight = false
     if eventTap then eventTap:stop(); eventTap = nil end
     if focusChangeTap then focusChangeTap:stop(); focusChangeTap = nil end
     if appWatcher then appWatcher:stop(); appWatcher = nil end
