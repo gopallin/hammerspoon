@@ -6,7 +6,11 @@ local eventTap = nil
 local focusChangeTap = nil
 local appWatcher = nil
 local expireTimer = nil
-local isPrivacyMode = false
+-- "auto"   -- trust the probe; an unreadable focus state masks (fail closed)
+-- "always" -- mask everything, whatever the probe says
+-- "reveal" -- show through an UNKNOWN focus state; a positively detected
+--            password field still masks (see isProtected)
+local privacyMode = "auto"
 local notification = require("modules.notification")
 
 -- Keycap Configuration (Bottom-Right)
@@ -54,7 +58,7 @@ local focusChangingKeyCodes = {
 
 -- ── PROTECTION PROBE ─────────────────────────────────────────────────────────
 -- The accessibility probe below used to run on EVERY keyDown, from inside the
--- event tap callback: one systemElement() round trip plus up to eight
+-- event tap callback: one systemWideElement() round trip plus up to eight
 -- attributeValue() calls, each a synchronous IPC to whatever app is frontmost.
 -- An app that is busy answers slowly, and a keyDown tap that blocks delays the
 -- keystroke reaching the app -- then macOS disables a tap that stays
@@ -73,15 +77,21 @@ local function invalidateProtection()
     cachedAxProtected = nil
 end
 
--- Answers "is the focused element a password-ish field". Returns true on ANY
--- failure. Fail-closed is the whole point: this decides whether the next
--- keystroke is painted on screen in plaintext, where a screen recording or a
--- shared display will capture it. The previous version returned false when the
--- pcall failed or the element could not be read, i.e. it showed the characters
--- precisely when it had no idea what was being typed into.
+-- Answers "is the focused element a password-ish field" as one of three values:
+-- "yes", "no", or "unknown". The third is not a rounding error -- an app that
+-- publishes no focused element gives us exactly that, and the user can choose
+-- to see through an unknown (privacyMode == "reveal"), whereas a "yes" is
+-- evidence and masks unconditionally.
+--
+-- systemWideElement(), NOT systemElement(): the latter is not a function in
+-- hs.axuielement, so this call threw on every invocation and the pcall
+-- swallowed it. Under the original fail-OPEN code that read as "no password
+-- field" and the probe was silently dead; 7d58136 made the same throw fail
+-- CLOSED, which is why every keystroke has been masked since. The probe had
+-- never once actually inspected anything.
 local function probeAxProtected()
     local ok, result = pcall(function()
-        local focusedElement = hs.axuielement.systemElement():attributeValue("AXFocusedUIElement")
+        local focusedElement = hs.axuielement.systemWideElement():attributeValue("AXFocusedUIElement")
         if not focusedElement then return nil end
 
         local role = focusedElement:attributeValue("AXRole")
@@ -102,24 +112,33 @@ local function probeAxProtected()
         return false
     end)
 
-    if not ok then return true end
-    -- nil means there was no focused element to inspect -- unknown, not safe.
-    if result == nil then return true end
-    return result
+    -- An AX error is not evidence of a password field, and neither is an app
+    -- that declines to publish its focused element. Both are "unknown".
+    if not ok then return "unknown" end
+    if result == nil then return "unknown" end
+    return result and "yes" or "no"
 end
 
-local function isAutoProtected()
+local function isProtected()
     -- Both of these are cheap local reads, so they stay on the hot path and are
     -- never cached: a manual toggle or macOS secure input must take effect on
-    -- the very next keystroke.
-    if isPrivacyMode or hs.eventtap.isSecureInputEnabled() then return true end
+    -- the very next keystroke. Secure input is the OS itself reporting a
+    -- password field, so it outranks a user asking to reveal.
+    if privacyMode == "always" then return true end
+    if hs.eventtap.isSecureInputEnabled() then return true end
 
     local now = hs.timer.secondsSinceEpoch()
     if cachedAxProtected == nil or (now - cachedAxTime) > AX_PROBE_MAX_AGE then
         cachedAxProtected = probeAxProtected()
         cachedAxTime = now
     end
-    return cachedAxProtected
+
+    if cachedAxProtected == "yes" then return true end
+    if cachedAxProtected == "no" then return false end
+    -- Unknown: still fail closed, unless the user explicitly asked to see
+    -- through it. That choice cannot uncover a field we DID recognise -- both
+    -- hard signals above have already returned by this point.
+    return privacyMode ~= "reveal"
 end
 
 local function resolveKeyText(keyCode, char)
@@ -191,9 +210,9 @@ local function updateDisplay()
         if keyCanvas:isShowing() then keyCanvas:hide() end
         return
     end
-    local isProtected = isAutoProtected()
-    if keyCanvas[3] then keyCanvas[3].textColor.alpha = isProtected and 1 or 0 end
-    keyCanvas[2].text = getDisplayString(isProtected)
+    local protected = isProtected()
+    if keyCanvas[3] then keyCanvas[3].textColor.alpha = protected and 1 or 0 end
+    keyCanvas[2].text = getDisplayString(protected)
     if not keyCanvas:isShowing() then keyCanvas:show() end
 end
 
@@ -237,12 +256,25 @@ local function syncExpireTimer()
     end
 end
 
-function M.togglePrivacy()
-    isPrivacyMode = not isPrivacyMode
-    charBuffer = {}
+-- Three states, not an on/off pair, because "off" could not answer the case
+-- that actually bites: an app publishing no focused UI element reads as
+-- unknown, unknown fails closed, and there was no way to ask for the keycaps
+-- back. "reveal" is that way, and it still cannot uncover a field that the
+-- probe or the OS positively identified as secure.
+local nextPrivacyMode = { auto = "always", always = "reveal", reveal = "auto" }
+local privacyModeMessage = {
+    auto   = "Privacy: AUTO",
+    always = "Privacy: ALWAYS 🔒",
+    reveal = "Privacy: REVEAL 👁",
+}
 
-    local msg = isPrivacyMode and "Privacy Mode ON 🔒" or "Privacy Mode OFF"
-    notification.showStatus(msg)
+function M.cyclePrivacy()
+    privacyMode = nextPrivacyMode[privacyMode] or "auto"
+    charBuffer = {}
+    -- The mode changed what an unknown answer means, so a cached one is stale.
+    invalidateProtection()
+
+    notification.showStatus(privacyModeMessage[privacyMode])
 
     updateDisplay()
     syncExpireTimer()   -- buffer was just cleared, so this stops the timer
