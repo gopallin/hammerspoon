@@ -1,19 +1,27 @@
--- Countdown snake overlay: a wandering snake whose body glyphs spell the time
--- remaining until TARGET, drawn on a click-through full-screen canvas.
--- Toggle with alt+cmd+D.
+-- Countdown chyron overlay: a vertical ticker pinned near the right screen
+-- edge. The glyphs of the time remaining until TARGET are stacked upright, one
+-- per line, and the whole column scrolls bottom-to-top on a click-through
+-- canvas. Toggle with alt+cmd+D.
 --
 -- ── POWER MODEL ──────────────────────────────────────────────────────────────
--- A full-screen overlay that animates is the most expensive thing in this
--- config: every frame dirties a Retina-sized layer and stops the display from
--- settling to a low refresh rate. So the module is built around NOT drawing:
+-- Anything that animates is the most expensive thing in this config: every
+-- frame dirties a Retina-sized layer and stops the display from settling to a
+-- low refresh rate. So the module is built around NOT drawing:
 --
+--   * The canvas is a NARROW COLUMN, not the full screen. Its predecessor let
+--     the glyphs wander the whole desktop, which forced a screen-sized layer:
+--     every frame invalidated ~2 million pixels to move a dozen characters. A
+--     chyron lives inside COLUMN_WIDTH x screen-height, roughly 4% of that
+--     area, and the compositor's damage rect shrinks with it.
 --   * ONE timer, not three. Wake-up count matters more than the work done in
---     each wake-up -- a CPU poked 12x a second never reaches a deep idle state
+--     each wake-up -- a CPU poked 6x a second never reaches a deep idle state
 --     -- and hs.timer has no coalescing/tolerance knob to soften that, so the
 --     only lever is fewer timers. The mouse check and the once-a-second clock
---     update ride on the move tick.
+--     update ride on the scroll tick.
 --   * The tick interval is DERIVED from the current pause set on every state
---     change, never nudged from the outside.
+--     change, never nudged from the outside. Scroll distance per tick is then
+--     derived from that interval, so a slower tick moves further and the chyron
+--     travels at the same points-per-second whatever the power source.
 --   * "Hard" pause reasons (sleep) stop the timer outright, because an event
 --     will wake us. "Soft" ones (idle, mouse) only slow it down, because
 --     noticing that they have cleared requires polling.
@@ -37,22 +45,29 @@
 local M = {}
 
 -- ==================== 低耗能可調整參數 (Low-Power Configuration) ====================
-local SHOW_FOOD = false             -- 是否顯示食物紅點 (false 亦可節省尋路運算)
 -- 省電的主要槓桿是「沒人在用就完全停」(IDLE_PAUSE_SECONDS)，不是降低幀率：
 -- 有人在看時給滿 ≈6FPS，一離開就停到 0.2 次喚醒/秒。所以兩種電源的間隔幾乎
 -- 相同，電池只略降。想恢復明顯的「電池降幀」把 MOVE_INTERVAL_BATTERY 調大即可。
-local MOVE_INTERVAL_AC = 0.16       -- 接電時的移動間隔（秒；0.16s≈6FPS）
-local MOVE_INTERVAL_BATTERY = 0.17  -- 電池供電時的移動間隔（秒）
-local IDLE_PAUSE_SECONDS = 25       -- 無操作超過這麼久就停止動畫（沒人在看）
+local MOVE_INTERVAL_AC = 0.16       -- 接電時的更新間隔（秒；0.16s≈6FPS）
+local MOVE_INTERVAL_BATTERY = 0.17  -- 電池供電時的更新間隔（秒）
+local IDLE_PAUSE_SECONDS = 25       -- 無操作超過這麼久就停止捲動（沒人在看）
 local IDLE_POLL_INTERVAL = 5        -- idle 暫停期間的偵測間隔（秒）
-local MOUSE_POLL_INTERVAL = 0.3     -- 游標壓在蛇身上、變暗暫停期間的偵測間隔（秒）
+local MOUSE_POLL_INTERVAL = 0.3     -- 游標壓在跑馬燈上、變暗暫停期間的偵測間隔（秒）
 local MOUSE_CHECK_EVERY = 2         -- 正常執行時每 N 個 tick 才檢查一次游標
 local WATCHDOG_INTERVAL = 30        -- sleep 暫停期間的保險偵測間隔（秒）
-local TEXT_ALPHA = 0.50             -- 蛇身數字透明度
-local HEAD_ALPHA = 0.75             -- 蛇頭數字透明度
-local DIMMED_ALPHA = 0.15           -- 游標碰到蛇時整體變暗的透明度
+local TEXT_ALPHA = 0.50             -- 字身透明度
+local LEAD_ALPHA = 0.75             -- 領頭字（最高位數字）透明度
+local DIMMED_ALPHA = 0.15           -- 游標碰到跑馬燈時整體變暗的透明度
 local FONT_SIZE = 22                -- 數字字型大小
-local GRID_STEP = 19                -- 蛇身節點間距
+local GLYPH_STEP = 24               -- 上下相鄰字元的間距（點）
+-- 「字與右邊框的距離」就只看這一個值：字是靠右對齊到欄位右緣的，而欄位右緣
+-- 就貼在「螢幕可用區右緣往左 COLUMN_MARGIN 點」的位置。調大 = 離邊框更遠。
+-- 上限參考：keycap.lua 的按鍵框右緣在距離右緣 40 點處，COLUMN_MARGIN 超過
+-- 約 27 就會讓數字疊到那個框上。
+local COLUMN_MARGIN = 18            -- 數字右緣距離螢幕可用區右緣的距離（點）
+local SCROLL_SPEED = 46             -- 捲動速度（點/秒），由下往上
+local LOOP_GAP = 120                -- 整串跑完到下一輪自螢幕下方再進場之間的空白（點）
+local BOTTOM_INSET = 24             -- 底部留白，避開 modules/statusbar.lua 的 20pt 狀態列
 -- ====================================================================================
 
 local TARGET = {year = 2068, month = 9, day = 29, hour = 0, min = 0, sec = 0}
@@ -63,27 +78,17 @@ local TARGET_EPOCH = os.time(TARGET)
 
 -- Derived drawing constants, hoisted out of the per-frame path.
 local GLYPH_BOX = FONT_SIZE * 1.5
-local GLYPH_OFFSET = FONT_SIZE / 2
-local HEAD_COLOR = {red = 0.3, green = 1, blue = 0.5, alpha = HEAD_ALPHA}
+-- Only has to be wide enough for the widest glyph. It does NOT move the text:
+-- the glyphs are right-aligned to the column's right edge, so the gap from the
+-- screen edge is COLUMN_MARGIN alone. Widening this grows the column leftwards
+-- into transparent space.
+local COLUMN_WIDTH = FONT_SIZE * 2
+local LEAD_COLOR = {red = 0.3, green = 1, blue = 0.5, alpha = LEAD_ALPHA}
 local BODY_COLOR = {white = 1, alpha = TEXT_ALPHA}
-
--- Element index of the first snake glyph. The food circle, when enabled, owns
--- index 1 so that glyph indices stay fixed for the life of the canvas.
-local BODY_OFFSET = SHOW_FOOD and 1 or 0
-
--- The four candidate steps, allocated once. getValidDirections() used to build
--- this table plus a result table on every frame; both are now reused, and dir
--- may alias an entry here, so these tables are never mutated.
-local DIRECTIONS = {
-    {x = 1, y = 0},
-    {x = -1, y = 0},
-    {x = 0, y = 1},
-    {x = 0, y = -1},
-}
 
 -- Live objects
 local canvas
-local tickTimer          -- the single move/mouse/clock timer
+local tickTimer          -- the single scroll/mouse/clock timer
 local watchdogTimer      -- only alive while sleep-paused
 local caffeinateWatcher
 local batteryWatcher
@@ -92,25 +97,22 @@ local toggleHotkey
 
 -- State
 local pauseReasons = {}  -- reason(string) -> true; any entry => animation paused
-local screenFrame
-local gridMaxX, gridMaxY -- inclusive walkable grid bounds, from the screen size
-local dir = {x = 1, y = 0}
-local snakeHead = {x = 20, y = 15}
-local snakeBody = {}
-local targetFood = nil
+local columnFrame        -- absolute screen rect of the canvas
+local trackHeight = 0    -- canvas height; the chyron's travel distance
+local leadY = 0          -- canvas-local y of the FIRST glyph's box top
+local currentInterval = MOVE_INTERVAL_AC   -- interval the tick timer is running at
 local cachedCountdownStr = ""
 local builtLength = 0    -- glyph count the canvas elements were built for
 local lastText = ""      -- glyphs currently assigned to those elements
 local tickIndex = 0
 local lastClockEpoch = 0
 
--- Scratch buffers reused every frame so the render/step path allocates nothing.
-local frameBuf = {x = 0, y = 0, w = GLYPH_BOX, h = GLYPH_BOX}
-local centerBuf = {x = 0, y = 0}
-local validDirs = {}
+-- Scratch buffer reused every frame so the render path allocates nothing. Only
+-- .y ever changes: the column is a fixed width and every glyph box is square.
+local frameBuf = {x = 0, y = 0, w = COLUMN_WIDTH, h = GLYPH_BOX}
 
 local function log(fmt, ...)
-    print(string.format("[countdown_snake] " .. fmt, ...))
+    print(string.format("[countdown_chyron] " .. fmt, ...))
 end
 
 local function isPaused()
@@ -144,23 +146,27 @@ local function countdownString()
     return string.format("%d:%02d:%02d:%02d", days, hours, minutes, seconds)
 end
 
-local function initSnakeBody()
+-- Height of the whole stacked string, lead glyph's top edge to tail glyph's
+-- bottom edge. Recomputed rather than cached: it changes on the day the day
+-- count loses a digit, and the arithmetic is cheaper than the staleness bug.
+local function stringHeight()
+    return (#cachedCountdownStr - 1) * GLYPH_STEP + GLYPH_BOX
+end
+
+-- Park the string flush with the bottom of the column, fully on screen. Chosen
+-- over "start just below the bottom edge" so that toggling the chyron on shows
+-- a readable countdown immediately instead of eight seconds of empty column.
+local function resetScroll()
     cachedCountdownStr = countdownString()
-    snakeBody = {}
-    local startX, startY = 30, 20
-    dir = DIRECTIONS[1]
-    for i = 1, #cachedCountdownStr do
-        snakeBody[i] = {x = startX - (i - 1), y = startY}
-    end
-    snakeHead = snakeBody[1]
+    leadY = trackHeight - stringHeight()
 end
 
 -- ── Timing ───────────────────────────────────────────────────────────────────
 
 -- Soft pause reasons need only enough tick rate to notice they have cleared;
--- everything else runs at the configured move interval for the current power
--- source. Both the reason set and the power source are read here rather than
--- cached, so this cannot answer with a stale value.
+-- everything else runs at the configured interval for the current power source.
+-- Both the reason set and the power source are read here rather than cached, so
+-- this cannot answer with a stale value.
 local function resolveInterval()
     if pauseReasons.idle then return IDLE_POLL_INTERVAL end
     if pauseReasons.mouse then return MOUSE_POLL_INTERVAL end
@@ -175,10 +181,13 @@ local setReason
 
 -- Single owner of every timer in this module. Called on any state change and
 -- always rebuilds from scratch, so no caller has to reason about which timers
--- are currently running.
+-- are currently running. It is also the only writer of currentInterval, which
+-- keeps the scroll speed in points-per-second independent of the tick rate.
 local function applyTiming()
     if tickTimer then tickTimer:stop(); tickTimer = nil end
     if watchdogTimer then watchdogTimer:stop(); watchdogTimer = nil end
+
+    currentInterval = resolveInterval()
 
     -- Hidden by alt+cmd+D, or torn down: nothing to animate and nothing to poll.
     if not canvas or not canvas:isShowing() then return end
@@ -196,7 +205,7 @@ local function applyTiming()
         return
     end
 
-    tickTimer = hs.timer.doEvery(resolveInterval(), tick)
+    tickTimer = hs.timer.doEvery(currentInterval, tick)
 end
 
 -- Reflect the current pause set onto the canvas and the timers.
@@ -208,7 +217,7 @@ local function applyPause()
 end
 
 -- Deliberate deviation from wallpaper/init.lua, which logs every setReason call:
--- the "mouse" reason here flips whenever the cursor crosses the snake, and
+-- the "mouse" reason here flips whenever the cursor enters the column, and
 -- logging that at tick rate would itself be a measurable I/O cost. Only real
 -- transitions are logged, which is still every change of state.
 function setReason(reason, active)
@@ -224,20 +233,32 @@ end
 
 -- ── Geometry ─────────────────────────────────────────────────────────────────
 
--- Re-derived on start and on any display/resolution change. The grid bounds
--- used to be two divisions recomputed inside getValidDirections() on every
--- frame, even though they only change when the screen does.
+-- Re-derived on start and on any display/resolution change. frame() rather than
+-- fullFrame(): a chyron sits at a fixed place for minutes at a time, so it must
+-- clear the menu bar and the Dock instead of scrolling underneath them. The
+-- extra BOTTOM_INSET clears modules/statusbar.lua's bar, which frame() does not
+-- know about because it is an overlay canvas rather than a system bar.
+--
+-- Anchored to the RIGHT edge: x is derived so that the column's right edge --
+-- which the glyphs are aligned to -- lands COLUMN_MARGIN in from the screen's
+-- right edge. COLUMN_WIDTH therefore only extends the transparent area
+-- leftwards and never shifts the digits.
 local function refreshScreenGeometry()
-    screenFrame = hs.screen.mainScreen():fullFrame()
-    gridMaxX = math.floor(screenFrame.w / GRID_STEP) - 3
-    gridMaxY = math.floor(screenFrame.h / GRID_STEP) - 3
-    if canvas then canvas:frame(screenFrame) end
+    local f = hs.screen.mainScreen():frame()
+    columnFrame = {
+        x = f.x + f.w - COLUMN_MARGIN - COLUMN_WIDTH,
+        y = f.y,
+        w = COLUMN_WIDTH,
+        h = math.max(GLYPH_BOX, f.h - BOTTOM_INSET),
+    }
+    trackHeight = columnFrame.h
+    if canvas then canvas:frame(columnFrame) end
 
-    -- A shrunken display can leave the snake outside the walkable box, where
-    -- every candidate step is invalid and it would sit still forever.
-    if snakeHead and (snakeHead.x > gridMaxX or snakeHead.y > gridMaxY) then
-        log("screen shrank to %dx%d, respawning snake", screenFrame.w, screenFrame.h)
-        initSnakeBody()
+    -- A shrunken display can leave the string parked below the new bottom edge,
+    -- where it would be invisible for a whole loop before scrolling back in.
+    if leadY > trackHeight + LOOP_GAP then
+        log("screen shrank to %dx%d, reparking chyron", f.w, f.h)
+        resetScroll()
     end
 end
 
@@ -247,30 +268,24 @@ end
 -- ~57 Lua tables (element + frame + color for each glyph) and called
 -- replaceElements() on every frame; at 6 FPS that was ~350 short-lived tables a
 -- second of pure GC pressure for a picture whose only per-frame change is a
--- handful of x/y pairs. Colors, font and box size never change, so they are
+-- handful of y values. Colors, font and box size never change, so they are
 -- written once here and never touched again.
 local function buildElements()
     local elements = {}
 
-    if SHOW_FOOD then
-        elements[1] = {
-            type = "circle",
-            action = "fill",
-            center = {x = -100, y = -100},   -- offscreen until spawnFood() runs
-            radius = 6,
-            fillColor = {red = 1, green = 0.3, blue = 0.3, alpha = 0.8},
-        }
-    end
-
     for i = 1, #cachedCountdownStr do
-        elements[i + BODY_OFFSET] = {
+        elements[i] = {
             type = "text",
             text = cachedCountdownStr:sub(i, i),
-            frame = {x = 0, y = 0, w = GLYPH_BOX, h = GLYPH_BOX},
-            textColor = (i == 1) and HEAD_COLOR or BODY_COLOR,
+            frame = {x = 0, y = 0, w = COLUMN_WIDTH, h = GLYPH_BOX},
+            textColor = (i == 1) and LEAD_COLOR or BODY_COLOR,
             textFont = "Menlo-Bold",
             textSize = FONT_SIZE,
-            textAlignment = "center",
+            -- Right, not centre: it makes COLUMN_MARGIN the single, literal
+            -- "distance from the screen edge to the digits" knob. With centring
+            -- the real gap was COLUMN_MARGIN plus half the column's slack, so
+            -- COLUMN_WIDTH silently moved the text too.
+            textAlignment = "right",
         }
     end
 
@@ -294,149 +309,57 @@ local function render()
         for i = 1, builtLength do
             local char = str:sub(i, i)
             if char ~= lastText:sub(i, i) then
-                canvas:elementAttribute(i + BODY_OFFSET, "text", char)
+                canvas:elementAttribute(i, "text", char)
             end
         end
         lastText = str
     end
 
-    -- Positions: reuse one rect table for all of them. min() is defensive --
-    -- stepSnake() keeps #snakeBody equal to builtLength.
-    local count = #snakeBody
-    if count > builtLength then count = builtLength end
-    for i = 1, count do
-        local pos = snakeBody[i]
-        frameBuf.x = pos.x * GRID_STEP - GLYPH_OFFSET
-        frameBuf.y = pos.y * GRID_STEP - GLYPH_OFFSET
-        canvas:elementAttribute(i + BODY_OFFSET, "frame", frameBuf)
-    end
-
-    if SHOW_FOOD and targetFood then
-        centerBuf.x = targetFood.x * GRID_STEP
-        centerBuf.y = targetFood.y * GRID_STEP
-        canvas:elementAttribute(1, "center", centerBuf)
+    -- Positions: one rect table reused for all of them. Glyph 1 leads at the
+    -- top of the column, so reading order survives the scroll -- the top of the
+    -- string is what crosses the bottom edge first on the way in.
+    for i = 1, builtLength do
+        frameBuf.y = leadY + (i - 1) * GLYPH_STEP
+        canvas:elementAttribute(i, "frame", frameBuf)
     end
 end
 
 local function createCanvas()
-    canvas = hs.canvas.new(screenFrame)
+    canvas = hs.canvas.new(columnFrame)
     canvas:level(hs.drawing.windowLevels.overlay)
     canvas:clickActivating(false)
     canvas:behaviorAsLabels({"canJoinAllSpaces", "stationary"})
 end
 
--- ── Movement ─────────────────────────────────────────────────────────────────
+-- ── Scrolling ────────────────────────────────────────────────────────────────
 
-local function spawnFood()
-    if not SHOW_FOOD then return end
-    local maxGridX = math.floor(screenFrame.w / GRID_STEP) - 5
-    local maxGridY = math.floor(screenFrame.h / GRID_STEP) - 5
-    targetFood = {
-        x = math.random(5, math.max(6, maxGridX)),
-        y = math.random(5, math.max(6, maxGridY))
-    }
-end
+-- Advance by points-per-second x seconds-per-tick rather than a fixed number of
+-- points, so switching to battery power slows the wake-ups without also slowing
+-- the chyron down to a visibly different speed.
+local function stepChyron()
+    leadY = leadY - SCROLL_SPEED * currentInterval
 
--- Fills the shared validDirs buffer and returns how many entries are valid.
--- Returning a count instead of a fresh table keeps the step path allocation-free.
-local function collectValidDirections(head)
-    local n = 0
-    for i = 1, 4 do
-        local d = DIRECTIONS[i]
-        if not (d.x == -dir.x and d.y == -dir.y) then
-            local nextX = head.x + d.x
-            local nextY = head.y + d.y
-            if nextX >= 3 and nextX <= gridMaxX and nextY >= 3 and nextY <= gridMaxY then
-                n = n + 1
-                validDirs[n] = d
-            end
-        end
-    end
-    return n
-end
-
-local function stepSnake()
-    local count = collectValidDirections(snakeHead)
-    if count == 0 then
-        dir = {x = -dir.x, y = -dir.y}
-        count = collectValidDirections(snakeHead)
-    end
-
-    if count > 0 then
-        if SHOW_FOOD and targetFood then
-            local bestDir = validDirs[1]
-            local minDist = 999999
-            for i = 1, count do
-                local d = validDirs[i]
-                local dist = math.abs(snakeHead.x + d.x - targetFood.x)
-                           + math.abs(snakeHead.y + d.y - targetFood.y)
-                if dist < minDist then
-                    minDist = dist
-                    bestDir = d
-                end
-            end
-            dir = bestDir
-        else
-            -- Lightweight wandering direction selection
-            local keepsCurrent = false
-            for i = 1, count do
-                local d = validDirs[i]
-                if d.x == dir.x and d.y == dir.y then keepsCurrent = true; break end
-            end
-            if not keepsCurrent or math.random() < 0.15 then
-                dir = validDirs[math.random(count)]
-            end
-        end
-    end
-
-    local nextX = snakeHead.x + dir.x
-    local nextY = snakeHead.y + dir.y
-
-    if SHOW_FOOD and targetFood and nextX == targetFood.x and nextY == targetFood.y then
-        targetFood = nil
-        spawnFood()
-    end
-
-    -- Recycle the tail node as the new head: in the steady state this is the
-    -- whole step, with no allocation at all.
-    local requiredLen = #cachedCountdownStr
-    local newHead
-    if #snakeBody >= requiredLen and #snakeBody > 1 then
-        newHead = table.remove(snakeBody)
-        newHead.x, newHead.y = nextX, nextY
-    else
-        newHead = {x = nextX, y = nextY}
-    end
-    table.insert(snakeBody, 1, newHead)
-    snakeHead = newHead
-
-    -- Keep #snakeBody == #cachedCountdownStr so every glyph has a node. The
-    -- countdown only ever loses digits, so the pad branch is a safety net.
-    while #snakeBody > requiredLen do
-        table.remove(snakeBody)
-    end
-    while #snakeBody < requiredLen do
-        local last = snakeBody[#snakeBody]
-        snakeBody[#snakeBody + 1] = {x = last.x, y = last.y}
+    -- Whole string has cleared the top edge: re-enter from below the bottom one.
+    if leadY + stringHeight() < 0 then
+        leadY = trackHeight + LOOP_GAP
     end
 
     render()
 end
 
-local function mouseTouchesSnake()
+-- Horizontally this uses the whole column, including the transparent slack to
+-- the left of the right-aligned digits, so the chyron yields a little before
+-- the cursor actually touches a glyph. Vertically it is exact: for most of a
+-- loop the column is empty, and there is nothing to get out of the way of.
+local function mouseOverChyron()
+    if not columnFrame then return false end
     local mouse = hs.mouse.absolutePosition()
-    local mouseGridX = math.floor(mouse.x / GRID_STEP)
-    local mouseGridY = math.floor(mouse.y / GRID_STEP)
 
-    local count = #snakeBody
-    if count > 20 then count = 20 end
-    for i = 1, count do
-        local p = snakeBody[i]
-        if math.abs(p.x - mouseGridX) <= 2 and math.abs(p.y - mouseGridY) <= 2 then
-            return true
-        end
-    end
-    return false
+    local localX = mouse.x - columnFrame.x
+    if localX < 0 or localX > COLUMN_WIDTH then return false end
+
+    local localY = mouse.y - columnFrame.y
+    return localY >= leadY and localY <= leadY + stringHeight()
 end
 
 -- ── The single tick ──────────────────────────────────────────────────────────
@@ -465,7 +388,7 @@ function tick()
     -- the only thing that can clear it.
     if not pauseReasons.idle
         and (pauseReasons.mouse or tickIndex % MOUSE_CHECK_EVERY == 0) then
-        setReason("mouse", mouseTouchesSnake())
+        setReason("mouse", mouseOverChyron())
     end
 
     -- The clock is kept up even while paused, on a wake-up already being spent.
@@ -480,15 +403,15 @@ function tick()
         return
     end
 
-    stepSnake()   -- renders
+    stepChyron()   -- renders
 end
 
 -- ── Watchers ─────────────────────────────────────────────────────────────────
 
 -- Any event meaning "nobody can see the overlay". screensDidSleep is the one
 -- that matters most and the one the first version missed: the display can sleep
--- while the system stays awake, and the old code went on redrawing a
--- full-screen canvas onto a dark panel indefinitely.
+-- while the system stays awake, and the old code went on redrawing a canvas
+-- onto a dark panel indefinitely.
 local SLEEP_EVENTS, WAKE_EVENTS
 do
     local w = hs.caffeinate.watcher
@@ -548,7 +471,7 @@ end
 
 function M.toggle()
     -- After M.stop() there is no canvas and no watchers; showing a canvas here
-    -- would only produce a frozen snake, so stay off until M.start() runs.
+    -- would only produce a frozen chyron, so stay off until M.start() runs.
     if not canvas then return end
 
     if canvas:isShowing() then
@@ -557,7 +480,7 @@ function M.toggle()
         log("hidden")
     else
         canvas:show()
-        cachedCountdownStr = countdownString()
+        resetScroll()          -- start readable rather than mid-loop offscreen
         render()
         applyTiming()
         log("shown interval=%.2fs", resolveInterval())
@@ -566,7 +489,6 @@ end
 
 function M.start()
     M.stop()   -- idempotent: reload.lua re-runs this on every *.lua save
-    math.randomseed(os.time())
 
     pauseReasons = {}
     tickIndex = 0
@@ -576,7 +498,7 @@ function M.start()
 
     refreshScreenGeometry()
     createCanvas()
-    initSnakeBody()
+    resetScroll()
     canvas:show()
     render()   -- builds the elements, since builtLength is 0
 
@@ -584,12 +506,13 @@ function M.start()
     toggleHotkey = hs.hotkey.bind({"alt", "cmd"}, "D", M.toggle)
     applyTiming()
 
-    log("started interval=%.2fs powerSource=%s glyphs=%d",
-        resolveInterval(), tostring(hs.battery.powerSource()), builtLength)
+    log("started interval=%.2fs powerSource=%s glyphs=%d column=%dx%d",
+        resolveInterval(), tostring(hs.battery.powerSource()), builtLength,
+        columnFrame.w, columnFrame.h)
 end
 
 function M.stop()
-    -- Each timer and watcher individually. The previous version used
+    -- Each timer and watcher individually. An older version used
     -- ipairs{moveTimer, mouseTimer, countdownTimer}, which stops at the first
     -- nil hole and silently leaks the rest -- and a timer leaked across a hot
     -- reload doubles this module's power draw with nothing extra on screen.
@@ -602,7 +525,6 @@ function M.stop()
     pauseReasons = {}
     builtLength = 0
     lastText = ""
-    targetFood = nil
 end
 
 return M

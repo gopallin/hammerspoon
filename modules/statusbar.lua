@@ -21,7 +21,7 @@
 -- events desynchronises the first time macOS drops half of a pair. All
 -- sleep-ish events share ONE key that any wake event clears.
 --
--- There is deliberately NO idle pause here, unlike countdown_snake. For a
+-- There is deliberately NO idle pause here, unlike countdown_chyron. For a
 -- status bar "no input for a while" does not mean "not being looked at" --
 -- watching a video is idle, and the network rate is exactly what someone would
 -- be watching it for.
@@ -294,7 +294,7 @@ function M.start()
     -- Full teardown first. The previous version stopped only refreshTimer and
     -- screenWatcher, leaking mouseWatcher and the canvas if start() ever ran
     -- twice; adding a fourth watcher below made that worth fixing rather than
-    -- extending. Matches wallpaper/init.lua and countdown_snake.lua.
+    -- extending. Matches wallpaper/init.lua and countdown_chyron.lua.
     M.stop()
 
     createCanvas()
