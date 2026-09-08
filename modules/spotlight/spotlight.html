@@ -271,35 +271,26 @@
       if (node) node.scrollIntoView({ block: "nearest" });
     }
 
+    // This page sends an INDEX, never a URL and never a command string. The
+    // hammerspoon:// handlers are reachable by anything on the machine that can
+    // open a URL, so they resolve the index against the list Hammerspoon itself
+    // loaded; a request naming a command outright is not something they accept
+    // from anyone, this page included. The only free text that crosses is the
+    // search box, and Hammerspoon decides what to do with it.
     function openActive() {
       if (mode === "search" && filtered.length === 0) {
         const q = inputEl.value.trim();
         if (q) {
-          let url = q;
-          if (!url.includes(".") && !url.includes("://")) {
-            url = "https://www.google.com/search?q=" + encodeURIComponent(q);
-          } else if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            url = "https://" + url;
-          }
-          window.location = "hammerspoon://spotlight-safari-open?url=" + encodeURIComponent(url);
+          window.location = "hammerspoon://spotlight-safari-open?q=" + encodeURIComponent(q);
         }
         return;
       }
 
       if (filtered.length === 0) return;
       const item = filtered[active];
-      if (!item) return;
-      if (mode === "ghostty") {
-        if (item.command) {
-          const url = "hammerspoon://spotlight-ghostty-run?cmd=" + encodeURIComponent(item.command);
-          window.location = url;
-        }
-      } else {
-        if (item.url) {
-          const url = "hammerspoon://spotlight-safari-open?url=" + encodeURIComponent(item.url);
-          window.location = url;
-        }
-      }
+      if (!item || typeof item.idx !== "number") return;
+      const event = (mode === "ghostty") ? "spotlight-ghostty-run" : "spotlight-safari-open";
+      window.location = "hammerspoon://" + event + "?idx=" + encodeURIComponent(item.idx);
     }
 
     inputEl.addEventListener("input", filter);

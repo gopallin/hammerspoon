@@ -107,10 +107,6 @@ local lastText = ""      -- glyphs currently assigned to those elements
 local tickIndex = 0
 local lastClockEpoch = 0
 
--- Scratch buffer reused every frame so the render path allocates nothing. Only
--- .y ever changes: the column is a fixed width and every glyph box is square.
-local frameBuf = {x = 0, y = 0, w = COLUMN_WIDTH, h = GLYPH_BOX}
-
 local function log(fmt, ...)
     print(string.format("[countdown_chyron] " .. fmt, ...))
 end
@@ -277,7 +273,10 @@ local function buildElements()
         elements[i] = {
             type = "text",
             text = cachedCountdownStr:sub(i, i),
-            frame = {x = 0, y = 0, w = COLUMN_WIDTH, h = GLYPH_BOX},
+            -- Laid out once, at its offset within the string. The whole column
+            -- is then scrolled with a canvas transformation, so these never
+            -- change again -- see render().
+            frame = {x = 0, y = (i - 1) * GLYPH_STEP, w = COLUMN_WIDTH, h = GLYPH_BOX},
             textColor = (i == 1) and LEAD_COLOR or BODY_COLOR,
             textFont = "Menlo-Bold",
             textSize = FONT_SIZE,
@@ -315,13 +314,13 @@ local function render()
         lastText = str
     end
 
-    -- Positions: one rect table reused for all of them. Glyph 1 leads at the
-    -- top of the column, so reading order survives the scroll -- the top of the
-    -- string is what crosses the bottom edge first on the way in.
-    for i = 1, builtLength do
-        frameBuf.y = leadY + (i - 1) * GLYPH_STEP
-        canvas:elementAttribute(i, "frame", frameBuf)
-    end
+    -- Position: ONE canvas-level translate, not one frame write per glyph. The
+    -- glyphs already sit at their offsets within the string (see
+    -- buildElements), so scrolling is a property of the column, not of each
+    -- character. The previous version wrote a frame to all fourteen elements
+    -- every frame -- fourteen Lua->ObjC crossings and fourteen element
+    -- invalidations, six times a second, to express a single number.
+    canvas:transformation(hs.canvas.matrix.translate(0, leadY))
 end
 
 local function createCanvas()

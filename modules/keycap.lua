@@ -3,6 +3,8 @@ local M = {}
 local keyCanvas = nil
 local charBuffer = {}
 local eventTap = nil
+local focusChangeTap = nil
+local appWatcher = nil
 local expireTimer = nil
 local isPrivacyMode = false
 local notification = require("modules.notification")
@@ -15,6 +17,11 @@ local CHAR_TTL_SECONDS = 1.5
 local EXPIRE_CHECK_INTERVAL = 0.2
 local CANVAS_WIDTH = 170
 local CANVAS_HEIGHT = 38
+
+-- Backstop only. The cached answer is invalidated the moment anything that can
+-- move focus happens (see invalidateProtection), so this is what bounds the
+-- damage from a focus change none of those signals caught -- not the normal path.
+local AX_PROBE_MAX_AGE = 0.5
 
 -- Special non-printable keys
 local specialKeys = {
@@ -34,18 +41,53 @@ local modifierKeyCodes = {
     [59] = true, [60] = true, [61] = true, [62] = true, [63] = true,
 }
 
--- Check for Password Fields
-local function isAutoProtected()
-    if isPrivacyMode or hs.eventtap.isSecureInputEnabled() then return true end
-    local app = hs.application.frontmostApplication()
-    if not app then return false end
-    local ok, focusedElement = pcall(function()
-        return hs.axuielement.systemElement():attributeValue("AXFocusedUIElement")
-    end)
-    if ok and focusedElement then
+-- Keys that move focus, and therefore change the answer to "is the field I am
+-- typing into a secure one". Tab is the important one: tabbing from a username
+-- field to a password field is the exact moment the cached answer must not be
+-- reused.
+local focusChangingKeyCodes = {
+    [48] = true,   -- tab
+    [36] = true,   -- return
+    [76] = true,   -- keypad enter
+    [53] = true,   -- escape
+}
+
+-- ── PROTECTION PROBE ─────────────────────────────────────────────────────────
+-- The accessibility probe below used to run on EVERY keyDown, from inside the
+-- event tap callback: one systemElement() round trip plus up to eight
+-- attributeValue() calls, each a synchronous IPC to whatever app is frontmost.
+-- An app that is busy answers slowly, and a keyDown tap that blocks delays the
+-- keystroke reaching the app -- then macOS disables a tap that stays
+-- unresponsive, which silently kills this module. modules/mouse.lua already
+-- carries a comment about that exact failure mode; this was the same bug on the
+-- other side of the config.
+--
+-- So the expensive part is cached and the cache is invalidated by the things
+-- that can actually change the answer: a different app coming forward, a mouse
+-- click landing somewhere new, or a focus-moving key. Steady-state typing --
+-- thousands of keystrokes into one field -- now costs zero AX calls.
+local cachedAxProtected = nil
+local cachedAxTime = 0
+
+local function invalidateProtection()
+    cachedAxProtected = nil
+end
+
+-- Answers "is the focused element a password-ish field". Returns true on ANY
+-- failure. Fail-closed is the whole point: this decides whether the next
+-- keystroke is painted on screen in plaintext, where a screen recording or a
+-- shared display will capture it. The previous version returned false when the
+-- pcall failed or the element could not be read, i.e. it showed the characters
+-- precisely when it had no idea what was being typed into.
+local function probeAxProtected()
+    local ok, result = pcall(function()
+        local focusedElement = hs.axuielement.systemElement():attributeValue("AXFocusedUIElement")
+        if not focusedElement then return nil end
+
         local role = focusedElement:attributeValue("AXRole")
         local subrole = focusedElement:attributeValue("AXSubrole")
         if role == "AXSecureTextField" or subrole == "AXSecureTextField" then return true end
+
         local sensitiveKeywords = {"pass", "密碼", "密码", "pw"}
         local attributes = {"AXPlaceholderValue", "AXDescription", "AXTitle", "AXHelp", "AXLabel", "AXIdentifier"}
         for _, attr in ipairs(attributes) do
@@ -57,8 +99,27 @@ local function isAutoProtected()
                 end
             end
         end
+        return false
+    end)
+
+    if not ok then return true end
+    -- nil means there was no focused element to inspect -- unknown, not safe.
+    if result == nil then return true end
+    return result
+end
+
+local function isAutoProtected()
+    -- Both of these are cheap local reads, so they stay on the hot path and are
+    -- never cached: a manual toggle or macOS secure input must take effect on
+    -- the very next keystroke.
+    if isPrivacyMode or hs.eventtap.isSecureInputEnabled() then return true end
+
+    local now = hs.timer.secondsSinceEpoch()
+    if cachedAxProtected == nil or (now - cachedAxTime) > AX_PROBE_MAX_AGE then
+        cachedAxProtected = probeAxProtected()
+        cachedAxTime = now
     end
-    return false
+    return cachedAxProtected
 end
 
 local function resolveKeyText(keyCode, char)
@@ -72,9 +133,11 @@ end
 local function createKeyCanvas()
     local screen = hs.screen.mainScreen()
     local f = screen:fullFrame()
+    -- f.x/f.y, not 0/0: on a multi-display setup a secondary screen's frame has
+    -- a non-zero origin, and ignoring it put the canvas on the wrong display.
     keyCanvas = hs.canvas.new({
-        x = f.w - CANVAS_WIDTH - 40,
-        y = f.h - CANVAS_HEIGHT - 60,
+        x = f.x + f.w - CANVAS_WIDTH - 40,
+        y = f.y + f.h - CANVAS_HEIGHT - 60,
         w = CANVAS_WIDTH, h = CANVAS_HEIGHT
     })
     keyCanvas:level(hs.drawing.windowLevels.overlay)
@@ -188,6 +251,8 @@ end
 function M.start()
     M.stop()
     charBuffer = {}
+    invalidateProtection()
+
     eventTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
         local keyCode = event:getKeyCode()
         local char = event:getCharacters()
@@ -199,6 +264,9 @@ function M.start()
             if flags.ctrl then prefix = prefix .. "⌃" end
             if flags.shift and (keyCode > 50) then prefix = prefix .. "⇧" end
         end
+        -- Before the buffer is touched, so the keystroke that MOVED focus is
+        -- itself judged against the new field rather than the old one.
+        if focusChangingKeyCodes[keyCode] then invalidateProtection() end
         local finalChar = resolveKeyText(keyCode, char)
         if finalChar ~= "" then
             table.insert(charBuffer, { rawChar = finalChar, prefix = prefix, keyCode = keyCode, t = hs.timer.secondsSinceEpoch() })
@@ -210,15 +278,35 @@ function M.start()
         return false
     end)
     eventTap:start()
+
+    -- Click-to-focus. Mouse DOWN only -- this is a few events a minute, unlike a
+    -- mouseMoved tap -- and the callback does nothing but drop a cached boolean.
+    focusChangeTap = hs.eventtap.new(
+        {hs.eventtap.event.types.leftMouseDown, hs.eventtap.event.types.rightMouseDown},
+        function()
+            invalidateProtection()
+            return false
+        end)
+    focusChangeTap:start()
+
+    -- A different app coming forward changes which app AXFocusedUIElement even
+    -- refers to, so the cached answer is about the wrong process.
+    appWatcher = hs.application.watcher.new(function(_, eventType)
+        if eventType == hs.application.watcher.activated then invalidateProtection() end
+    end)
+    appWatcher:start()
 end
 
 function M.stop()
     if eventTap then eventTap:stop(); eventTap = nil end
+    if focusChangeTap then focusChangeTap:stop(); focusChangeTap = nil end
+    if appWatcher then appWatcher:stop(); appWatcher = nil end
     stopExpireTimer()
     -- nil it too: updateDisplay() recreates the canvas when this is nil, and
     -- leaving a deleted canvas object here meant later calls poked a dead one.
     if keyCanvas then keyCanvas:delete(); keyCanvas = nil end
     charBuffer = {}
+    invalidateProtection()
 end
 
 return M

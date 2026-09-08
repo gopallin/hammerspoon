@@ -51,12 +51,30 @@ local REFRESH_INTERVAL = 5
 local SEPARATOR = "                 "
 
 -- Only the metrics hs.host has no API for. Output: "disk|rxBytes txBytes".
-local METRICS_SCRIPT = [[
+--
+-- df is in the SLOW variant only. Disk usage does not move at network-rate
+-- speed, and running it every 5s meant three processes per refresh (df, route,
+-- netstat) instead of two -- 17,280 df invocations a day to watch a number that
+-- changes by a percentage point an hour at most. The fast variant leaves the
+-- disk field empty, and render() then keeps showing the last reading.
+local METRICS_SCRIPT_FAST = [[
+iface=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')
+net=$(netstat -ibn -I "$iface" | awk 'NR==2 {print $7" "$10}')
+printf '%s|%s\n' "" "$net"
+]]
+
+local METRICS_SCRIPT_FULL = [[
 disk=$(df -k /System/Volumes/Data | awk 'NR==2 {gsub("%","",$5); print $5}')
 iface=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')
 net=$(netstat -ibn -I "$iface" | awk 'NR==2 {print $7" "$10}')
 printf '%s|%s\n' "$disk" "$net"
 ]]
+
+-- Refresh the disk figure every this-many refreshes (12 x 5s = once a minute).
+local DISK_EVERY = 12
+local refreshCount = 0
+local lastDisk = nil
+local lastText = nil
 
 local function log(fmt, ...)
     print(string.format("[statusbar] " .. fmt, ...))
@@ -170,7 +188,10 @@ local function render(stdOut)
     -- display for that -- the old code fell back to 0, which is a real reading.
     local cpu = cpuPercent()
     local mem = memPercent()
-    local disk = tonumber(diskField)
+    -- Empty on a fast refresh, which is most of them: carry the last reading
+    -- rather than blanking a figure that is still true.
+    local disk = tonumber(diskField) or lastDisk
+    lastDisk = disk
     local rx, tx = (netField or ""):match("(%d+)%s+(%d+)")
     rx, tx = tonumber(rx), tonumber(tx)
 
@@ -206,17 +227,25 @@ local function render(stdOut)
 
     if not barCanvas then
         createCanvas()
+        lastText = nil
     else
         updateCanvasFrame()
     end
-    barCanvas[2].text = text
+    -- Assigning to a canvas element attribute invalidates the layer whether or
+    -- not the value differs, so an unchanged bar was still repainting every 5s.
+    if text ~= lastText then
+        barCanvas[2].text = text
+        lastText = text
+    end
 end
 
 local function runUpdate()
     if isPaused() then return end
+    refreshCount = refreshCount + 1
+    local script = (refreshCount % DISK_EVERY == 1) and METRICS_SCRIPT_FULL or METRICS_SCRIPT_FAST
     hs.task.new("/bin/sh", function(_, stdOut)
         render(stdOut or "")
-    end, {"-c", METRICS_SCRIPT}):start()
+    end, {"-c", script}):start()
 end
 
 -- Single owner of the refresh timer, rebuilt from the pause set so no caller
@@ -247,12 +276,18 @@ local function setReason(reason, active)
     if not isPaused() then runUpdate() end
 end
 
+-- This is the highest-frequency callback in the whole config -- every mouse
+-- movement event on the system enters it -- so it does as little as possible.
+-- It used to call hs.mouse.absolutePosition() for a position the event was
+-- already carrying, buying a second round trip per event for nothing, and it
+-- tested both axes when the bar spans the full screen width and only y can
+-- ever rule a point out.
 local function startMouseWatcher()
-    mouseWatcher = hs.eventtap.new({hs.eventtap.event.types.mouseMoved}, function()
+    mouseWatcher = hs.eventtap.new({hs.eventtap.event.types.mouseMoved}, function(event)
         if not (barCanvas and barFrame) then return false end
-        local p = hs.mouse.absolutePosition()
-        local over = p.x >= barFrame.x and p.x <= barFrame.x + barFrame.w
-            and p.y >= barFrame.y and p.y <= barFrame.y + barFrame.h
+        local p = event:location()
+        local over = p.y >= barFrame.y and p.y <= barFrame.y + barFrame.h
+            and p.x >= barFrame.x and p.x <= barFrame.x + barFrame.w
         if over and not hiddenByMouse then
             hiddenByMouse = true
             barCanvas:hide()
@@ -328,6 +363,7 @@ function M.stop()
     barFrame, hiddenByMouse = nil, false
     prevRx, prevTx, prevTime = nil, nil, nil
     prevCpuActive, prevCpuIdle = nil, nil
+    refreshCount, lastDisk, lastText = 0, nil, nil
     pauseReasons = {}
 end
 

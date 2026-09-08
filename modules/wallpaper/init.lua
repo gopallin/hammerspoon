@@ -18,7 +18,8 @@ local M = {}
 -- State
 local instance = nil          -- current hs.webview, or nil when wallpaper is off
 local spacesWatcher = nil
-local fullscreenTimer = nil
+local coveredTimer = nil
+local appWatcher = nil
 local batteryWatcher = nil
 local caffeinateWatcher = nil
 local screenWatcher = nil
@@ -143,12 +144,39 @@ local function onFullscreenSpace()
     return hs.spaces.spaceType(space) == "fullscreen"
 end
 
+-- A window does not have to be FULLSCREEN to hide the wallpaper -- a merely
+-- maximised one hides just as much of it, and that case was decoding video at
+-- full rate behind an opaque window indefinitely. Only the frontmost window is
+-- inspected: it costs two accessibility calls on a 30s timer instead of walking
+-- every window, and the case worth catching (the window someone is actually
+-- working in, filling the screen) is exactly the frontmost one.
+--
+-- COVERED_FRACTION rather than an exact match because a "maximised" window
+-- stops short of the menu bar and, on some setups, the Dock.
+local COVERED_FRACTION = 0.94
+
+local function desktopCovered()
+    local ok, covered = pcall(function()
+        local win = hs.window.frontmostWindow()
+        if not win or not win:isStandard() or win:isMinimized() then return false end
+        local scr = win:screen()
+        if not scr then return false end
+        local wf, sf = win:frame(), scr:frame()
+        if sf.w <= 0 or sf.h <= 0 then return false end
+        return (wf.w * wf.h) / (sf.w * sf.h) >= COVERED_FRACTION
+    end)
+    -- Same failure direction as onFullscreenSpace: on error, play. A wallpaper
+    -- animating while hidden wastes battery; one wrongly paused looks broken.
+    if not ok then return false end
+    return covered
+end
+
 -- Silent when nothing changed, so the periodic recheck cannot drown out the log
 -- that the other pause reasons are diagnosed from.
-local function refreshFullscreenReason()
-    local active = onFullscreenSpace()
-    if active ~= (pauseReasons.fullscreen or false) then
-        setReason("fullscreen", active)
+local function refreshCoveredReason()
+    local active = onFullscreenSpace() or desktopCovered()
+    if active ~= (pauseReasons.covered or false) then
+        setReason("covered", active)
     end
 end
 
@@ -242,13 +270,26 @@ local function startWatchers()
     -- Fullscreen/tiled space showing -> pause (the wallpaper is covered anyway).
     -- Watching space changes rather than window events also fixes a case window
     -- events never reported at all: switching to an ALREADY-OPEN fullscreen app.
-    spacesWatcher = hs.spaces.watcher.new(refreshFullscreenReason)
+    spacesWatcher = hs.spaces.watcher.new(refreshCoveredReason)
     spacesWatcher:start()
 
-    -- Safety net for a missed space change: worst case the wallpaper corrects
-    -- itself within 30s instead of staying stuck until the next config reload.
-    fullscreenTimer = hs.timer.doEvery(FULLSCREEN_RECHECK_INTERVAL, refreshFullscreenReason)
-    refreshFullscreenReason()
+    -- Switching apps is what covers and uncovers the desktop most of the time,
+    -- and it is an event rather than a poll -- so the timer below stays at its
+    -- lazy interval instead of being sped up to notice.
+    appWatcher = hs.application.watcher.new(function(_, eventType)
+        if eventType == hs.application.watcher.activated
+            or eventType == hs.application.watcher.deactivated then
+            refreshCoveredReason()
+        end
+    end)
+    appWatcher:start()
+
+    -- Safety net for a missed space change, and the only thing that notices a
+    -- window being resized within the app that is already frontmost: worst case
+    -- the wallpaper corrects itself within 30s instead of staying stuck until
+    -- the next config reload.
+    coveredTimer = hs.timer.doEvery(FULLSCREEN_RECHECK_INTERVAL, refreshCoveredReason)
+    refreshCoveredReason()
 
     -- On battery power -> pause.
     batteryWatcher = hs.battery.watcher.new(function()
@@ -288,7 +329,8 @@ end
 
 local function stopWatchers()
     if spacesWatcher then spacesWatcher:stop(); spacesWatcher = nil end
-    if fullscreenTimer then fullscreenTimer:stop(); fullscreenTimer = nil end
+    if appWatcher then appWatcher:stop(); appWatcher = nil end
+    if coveredTimer then coveredTimer:stop(); coveredTimer = nil end
     if batteryWatcher then batteryWatcher:stop(); batteryWatcher = nil end
     if caffeinateWatcher then caffeinateWatcher:stop(); caffeinateWatcher = nil end
     if screenWatcher then screenWatcher:stop(); screenWatcher = nil end

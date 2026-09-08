@@ -47,6 +47,12 @@ end
 
 local moveSpeed = 3
 local moveInterval = 0.01
+-- Nobody holds a movement key for ten seconds, so a timer still running after
+-- that means its stopMove() never arrived -- a hotkey release macOS did not
+-- deliver, usually because focus changed while the key was down. Without this
+-- the timer runs for the rest of the session at 100Hz, dragging the cursor
+-- across the screen with no key held and no way to stop it short of a reload.
+local MAX_MOVE_SECONDS = 10
 local movingTimers = {}
 
 function M.leftClick()
@@ -59,7 +65,12 @@ end
 
 function M.startMove(key, dx, dy)
   if movingTimers[key] then return end
+  local startedAt = hs.timer.secondsSinceEpoch()
   movingTimers[key] = hs.timer.doEvery(moveInterval, function()
+    if hs.timer.secondsSinceEpoch() - startedAt > MAX_MOVE_SECONDS then
+      M.stopMove(key)
+      return
+    end
     local pt = hs.mouse.absolutePosition()
     hs.mouse.absolutePosition({ x = pt.x + dx, y = pt.y + dy })
   end)

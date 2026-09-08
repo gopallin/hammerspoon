@@ -1,2 +1,14 @@
-spotlight_options/ghostty_commands.json
+# Local machine config. NEVER commit these -- they carry internal hostnames,
+# IP addresses and account names.
+#
+# Why the patterns are unanchored: the previous version pinned the spotlight
+# config to `spotlight_options/ghostty_commands.json`. Commit b156a9d moved it to
+# `modules/spotlight/config/`, the pattern silently stopped matching, and the file
+# was committed to a PUBLIC repo for three months carrying two internal IPs and an
+# SSH key path. A leading-slash path is only as good as the last refactor; match on
+# the filename so a move cannot re-open the hole.
+ghostty_commands.json
+insights.env
+
+# Wallpaper videos and the generated player page.
 data/

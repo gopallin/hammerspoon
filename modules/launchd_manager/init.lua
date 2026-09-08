@@ -2,6 +2,21 @@ local launchd_manager = {}
 -- 引入排程資料
 local schedules = require("modules.launchd_manager.schedules")
 
+-- Single-quote for /bin/sh. hs.execute() hands the string to a shell, and the
+-- paths below are built from $HOME and -- in the cleanup pass -- from names read
+-- off the filesystem, so an apostrophe or a space in either one was enough to
+-- change what ran. Wrapping in single quotes and escaping embedded ones is the
+-- only form that needs no further reasoning about the contents.
+local function shellQuote(s)
+    return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
+-- Text nodes in the generated plist come from config values. Unescaped, a path
+-- containing & or < produces a plist that launchctl silently refuses to load.
+local function xmlEscape(s)
+    return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+end
+
 local function generatePlist(config)
     local plist = {}
     table.insert(plist, '<?xml version="1.0" encoding="UTF-8"?>')
@@ -10,12 +25,12 @@ local function generatePlist(config)
     table.insert(plist, '<dict>')
     
     table.insert(plist, '    <key>Label</key>')
-    table.insert(plist, string.format('    <string>%s</string>', config.label))
+    table.insert(plist, string.format('    <string>%s</string>', xmlEscape(config.label)))
     
     table.insert(plist, '    <key>ProgramArguments</key>')
     table.insert(plist, '    <array>')
     for _, arg in ipairs(config.programArguments) do
-        table.insert(plist, string.format('        <string>%s</string>', arg))
+        table.insert(plist, string.format('        <string>%s</string>', xmlEscape(arg)))
     end
     table.insert(plist, '    </array>')
     
@@ -34,12 +49,12 @@ local function generatePlist(config)
     
     if config.stdOut then
         table.insert(plist, '    <key>StandardOutPath</key>')
-        table.insert(plist, string.format('    <string>%s</string>', config.stdOut))
+        table.insert(plist, string.format('    <string>%s</string>', xmlEscape(config.stdOut)))
     end
     
     if config.stdErr then
         table.insert(plist, '    <key>StandardErrorPath</key>')
-        table.insert(plist, string.format('    <string>%s</string>', config.stdErr))
+        table.insert(plist, string.format('    <string>%s</string>', xmlEscape(config.stdErr)))
     end
     
     table.insert(plist, '</dict>')
@@ -50,7 +65,7 @@ end
 
 function launchd_manager.deploy()
     local launchAgentsDir = os.getenv("HOME") .. "/Library/LaunchAgents"
-    hs.execute("mkdir -p " .. launchAgentsDir)
+    hs.execute("mkdir -p " .. shellQuote(launchAgentsDir))
     
     local activePlists = {}
     for _, config in ipairs(schedules) do
@@ -62,7 +77,7 @@ function launchd_manager.deploy()
             if not activePlists[file] then
                 local obsoletePath = launchAgentsDir .. "/" .. file
                 print("🧹 清理已廢棄排程: " .. file)
-                hs.execute("launchctl unload " .. obsoletePath)
+                hs.execute("launchctl unload " .. shellQuote(obsoletePath))
                 os.remove(obsoletePath)
             end
         end
@@ -79,8 +94,8 @@ function launchd_manager.deploy()
             file:write(plistContent)
             file:close()
             
-            hs.execute("launchctl unload " .. plistPath)
-            local output, status = hs.execute("launchctl load " .. plistPath)
+            hs.execute("launchctl unload " .. shellQuote(plistPath))
+            local output, status = hs.execute("launchctl load " .. shellQuote(plistPath))
             
             if status then
                 print("✅ 部署成功: " .. plistName)
