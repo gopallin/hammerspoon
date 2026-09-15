@@ -47,6 +47,10 @@ local probeTimer = nil
 -- 問題，不能讓它的答案落下來當成新欄位的描述。
 local generation = 0
 
+-- 上一次 isProtected() 回答了什麼 -- 也就是畫面現在畫的是遮蔽還是明文。探測回來
+-- 時要比對的是這個，不是快取字串：見下面 refreshAsync 的註解。
+local lastDecision = nil
+
 -- 探測答案改變、而畫面已經用舊答案畫過時，由 init.lua 設成重畫函式。
 M.onAnswerChanged = nil
 
@@ -94,6 +98,10 @@ local function probe()
     return result and "yes" or "no"
 end
 
+-- 前置宣告：refreshAsync 的 callback 要呼叫 decide()，而 decide() 要呼叫
+-- refreshAsync，兩者互相參照。
+local decide
+
 -- 把探測丟到 runloop 的下一輪跑，而不是在呼叫端跑。呼叫端通常是 keyDown tap，
 -- 它必須「現在」就返回；答案只要來得及重畫就好，晚幾毫秒重畫看不出來。
 local function refreshAsync()
@@ -111,25 +119,34 @@ local function refreshAsync()
         -- 問的期間焦點移動了。丟掉：快取已經是 nil，而 nil 是安全的答案。
         if myGeneration ~= generation then return end
 
-        local previous = cachedAnswer
         cachedAnswer = answer
         cachedTime = hs.timer.secondsSinceEpoch()
-        -- 畫面上的東西是用「沒命中」畫出來的。只在答案真的改變了什麼的時候才重畫，
-        -- 而且這不會遞迴：快取現在是新鮮的，所以 isProtected() 不會再要求刷新。
-        if answer ~= previous and M.onAnswerChanged then M.onAnswerChanged() end
+        -- 比的是「結論」，不是「答案字串」。一個被重新確認的 no 字串沒變，但它把
+        -- 畫面上那個結論換掉了 -- 過期的 no 讀作 unknown、也就是遮蔽，重新確認之後
+        -- 是明文。只比字串的話那次遮蔽會一直留在畫面上，直到下一次按鍵才被蓋掉，
+        -- 而那正是「明明沒在打密碼、鎖頭卻一直跳出來」的成因。
+        -- 不會遞迴：快取現在是新鮮的，所以 decide() 不會再要求刷新。
+        if M.onAnswerChanged and lastDecision ~= nil and decide() ~= lastDecision then
+            M.onAnswerChanged()
+        end
     end)
 end
 
-function M.isProtected()
+-- 純粹的判斷，沒有記錄結論 -- 所以 refreshAsync 可以拿它來「試算」新結論而不會
+-- 弄髒 lastDecision（lastDecision 描述的是畫面，不是最新的知識）。
+function decide()
     -- 這兩個都是便宜的本地讀取，所以留在熱路徑上而且永不快取：手動切換或 macOS
     -- secure input 必須在「下一次按鍵」就生效。secure input 是 OS 自己在說這是
     -- 密碼欄，所以它的位階高過使用者要求顯示。
     if privacyMode == "always" then return true end
     if hs.eventtap.isSecureInputEnabled() then return true end
 
-    local now = hs.timer.secondsSinceEpoch()
-    local fresh = cachedAnswer ~= nil and (now - cachedTime) <= config.AX_PROBE_MAX_AGE
-    if not fresh then refreshAsync() end
+    local age = hs.timer.secondsSinceEpoch() - cachedTime
+    local fresh = cachedAnswer ~= nil and age <= config.AX_PROBE_MAX_AGE
+    -- 只在「已經過期」時才刷新，等於保證連續打字每 MAX_AGE 就踩中一次過期，而
+    -- 過期的 no 讀作 unknown、整個畫面遮一次。所以在還新鮮、但已經過了半條命的
+    -- 時候就先去刷，讓快取在持續打字期間永遠不會過期。這仍然不在按鍵路徑上。
+    if not fresh or age > config.AX_PROBE_REFRESH_AGE then refreshAsync() end
 
     -- "yes" 是證據，而它不會因為過期就不再是證據 -- 過期的 "yes" 在刷新飛行途中
     -- 仍然維持遮蔽。只有「新鮮的 no」才被允許顯示任何東西；過期的 no 一律當成
@@ -139,6 +156,25 @@ function M.isProtected()
     -- Unknown：仍然 fail closed，除非使用者明確要求看穿它。那個選擇無法揭露我們
     -- 「有」辨識出來的欄位 -- 上面兩個硬訊號在這裡之前就已經返回了。
     return privacyMode ~= "reveal"
+end
+
+function M.isProtected()
+    lastDecision = decide()
+    return lastDecision
+end
+
+-- 把快取保持在新鮮狀態。這不是為了回答誰的問題，是為了「下一次按鍵不會踩到過期」
+-- -- 過期的答案（連 no 也一樣）讀作 unknown、也就是整個畫面被遮一格，而在打字的
+-- 停頓之後那一格使用者看得到。由 init.lua 的過期 timer 呼叫：那個 timer 只在畫面
+-- 上有東西的時候才存在，所以閒置時不會因此多出任何喚醒或任何一次 AX 查詢。
+function M.keepFresh()
+    -- always 模式下遮蔽跟探測說什麼無關，所以這裡每一次查詢都是純浪費 -- 而它是
+    -- 主執行緒上的同步 IPC。離開這個模式會經過 cycleMode()，那裡已經 invalidate。
+    if privacyMode == "always" then return end
+    if cachedAnswer == nil
+        or (hs.timer.secondsSinceEpoch() - cachedTime) > config.AX_PROBE_REFRESH_AGE then
+        refreshAsync()
+    end
 end
 
 -- 三個狀態而不是開／關一對，因為「關」回答不了真正會咬人的情況：一個不公布焦點
@@ -176,6 +212,7 @@ end
 function M.stop()
     if probeTimer then probeTimer:stop(); probeTimer = nil end
     probeInFlight = false
+    lastDecision = nil
     M.invalidate()
 end
 
