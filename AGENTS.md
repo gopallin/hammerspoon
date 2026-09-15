@@ -95,6 +95,18 @@ Each entry lists the files that are worth opening first.
       after focus moves is masked for a few milliseconds until the async answer
       lands. A positive `yes` stays sticky once it has aged out, and only a
       *fresh* `no` may reveal anything — an expired `no` is treated as unknown.
+    - Because an expired `no` masks, the cache must never be *allowed* to expire
+      while someone is typing. It now refreshes at `AX_PROBE_REFRESH_AGE` — half
+      of `AX_PROBE_MAX_AGE`, so the answer is re-confirmed before it can age out
+      — and the expire timer calls `protection.keepFresh()` for as long as
+      anything is on screen, which covers the pauses between bursts without
+      adding a timer (that timer already exists only while the canvas shows).
+    - The async answer repaints on a change of **decision**, not of answer
+      string. A re-confirmed `no` is the same string, but it flips the display
+      from "expired ⇒ unknown ⇒ masked" back to plaintext. Comparing strings
+      skipped that repaint, so every expiry left a lock on screen until the next
+      keystroke overwrote it — which reads, correctly, as "the lock shows up no
+      matter what I type".
     - The probe calls `hs.axuielement.systemWideElement()`. There is no
       `systemElement()` — the module called that for months, the `pcall` ate the
       throw, and the probe never inspected a single field. Fail-open hid it;

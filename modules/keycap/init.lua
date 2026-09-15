@@ -49,7 +49,9 @@ local function syncExpireTimer()
         if buffer.pruneExpired() then updateDisplay() end
         -- 清空了：沒有東西會再過期，所以停掉而不是繼續輪詢。
         -- updateDisplay() 已經把 canvas 藏起來了。
-        if buffer.count() == 0 then stopExpireTimer() end
+        if buffer.count() == 0 then stopExpireTimer(); return end
+        -- 畫面還亮著，就表示下一次按鍵隨時會來，而它不該踩到過期的快取。
+        protection.keepFresh()
     end)
 end
 
