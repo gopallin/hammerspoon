@@ -119,6 +119,11 @@ Each entry lists the files that are worth opening first.
   `canvas.lua` scrolls via one canvas transformation per frame; `geometry.lua`
   derives the column rect; `config.lua` holds every power knob. `init.lua` is
   left with only the pause set, the single timer, and the watchers.
+    - `canvas.lua` owns **two** canvases, not one: the lead glyph and the body
+      glyphs need different opacities, and a canvas has exactly one `alpha()`.
+      The text itself is opaque so the black outline can be overdrawn cleanly;
+      translucency is a canvas-level property. Both get the same frame and the
+      same per-frame transformation, and `M.destroy()` must delete both.
 - `wallpaper/`: live video wallpaper behind the desktop icons. Pauses on
   battery, on sleep, and whenever the desktop is covered (`coverage.lua`).
   `player.lua` owns the webview, `page.lua` generates the player page.
