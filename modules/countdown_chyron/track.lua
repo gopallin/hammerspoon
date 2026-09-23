@@ -80,7 +80,7 @@ function M.mouseOver()
     local mouse = hs.mouse.absolutePosition()
 
     local localX = mouse.x - columnFrame.x
-    if localX < 0 or localX > geometry.COLUMN_WIDTH then return false end
+    if localX < 0 or localX > columnFrame.w then return false end
 
     local localY = mouse.y - columnFrame.y
     return localY >= leadY and localY <= leadY + stringHeight()

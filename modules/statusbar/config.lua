@@ -1,8 +1,18 @@
 return {
-    BAR_HEIGHT       = 20,
-    FONT_SIZE        = 14,
-    BACKGROUND_ALPHA = 0.55,
+    BAR_HEIGHT       = 25,
+    FONT_SIZE        = 15,
+    BACKGROUND_ALPHA = 0,
     REFRESH_INTERVAL = 5,
+
+    -- 文字外框。背景全透明，白字落在亮色桌布上就整個消失，靠描邊把它撐出來。
+    -- 單位是「字級的百分比」，不是點數；填正值，符號由 bar.lua 處理。
+    --
+    -- 描邊以字形輪廓為中心往兩邊各長一半，所以「看得到的黑邊」只有這個值的一半
+    -- -- 10% 在 15pt 下是 1.5pt 總寬、0.75pt 露在字外面。另一半被上層的白字蓋
+    -- 掉了（見 bar.lua 的兩層疊字），所以加粗只會往外長，不會侵蝕白色內裡。
+    -- 改 FONT_SIZE 就要回來重看這個值。
+    TEXT_STROKE_WIDTH = 40,
+    TEXT_STROKE_COLOR = { white = 0, alpha = 1 },
 
     -- 每個指標區段之間插入的間隔，想寬想窄改這裡。
     SEPARATOR = "                 ",
