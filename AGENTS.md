@@ -124,6 +124,24 @@ Each entry lists the files that are worth opening first.
       The text itself is opaque so the black outline can be overdrawn cleanly;
       translucency is a canvas-level property. Both get the same frame and the
       same per-frame transformation, and `M.destroy()` must delete both.
+    - `scriptable/countdown-chyron-widget.js`: the iOS counterpart, kept here for
+      version control only — Hammerspoon never loads it, and `modules/reload`
+      does not watch `.js`. Its `TARGET` duplicates `config.lua`'s `TARGET`;
+      nothing syncs the two, so changing one means changing both. The widget's
+      seconds are drawn by SwiftUI's `applyTimerStyle()`, which takes no format
+      argument: the system picks one of `H:MM:SS`, `MM:SS` or `M:SS`, and strips
+      the leading zero only of the *highest* field. So the ticker counts down to
+      the moment `days` decrements
+      (`TARGET` minus whole 24h steps): the highest field becomes hours, and
+      `MM:SS` is then always two digits for free. `days` is the only static text,
+      and `PAD_FIELDS` supplies a static prefix (`""`/`"0"`/`"00:"`/`"00:0"`) for
+      the hours field, which changes at just four thresholds — **4 refreshes a
+      day**. The first design counted down to the next *hour* instead, which put
+      minutes in the highest field and needed 48 refreshes/day to pad them;
+      WidgetKit dropped those (observed 2026-09-29) and the failure has no visual
+      tell — a missed refresh does not freeze the widget, `.timer` counts *up*
+      past the target and looks normal. Check it by reading the fields against
+      the wall clock. `TICK_RESERVE` is the knob if the string gets truncated.
 - `wallpaper/`: live video wallpaper behind the desktop icons. Pauses on
   battery, on sleep, and whenever the desktop is covered (`coverage.lua`).
   `player.lua` owns the webview, `page.lua` generates the player page.
